@@ -1,5 +1,25 @@
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/slynobody/SteamOS-wallpaper-engine-kde-plugin/total)  [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?&logo=buy-me-a-coffee&logoColor=black)](https://ko-fi.com/integr)
 
+# Fork additions
+
+This fork (koconnorgit) adds **Day / Night wallpaper switching** driven by KWin Night Light. With the toggle on, the wallpaper swaps between user-assigned Day and Night wallpapers when KWin reports a sunrise/sunset transition (independent of global theme switching).
+
+- Settings tab → Common Option → **Day / Night Wallpaper** toggle
+- Wallpapers tab → sun / moon icons on each card (and in the right-side detail panel) to assign or clear the Day / Night wallpaper
+- Requires KWin Night Light to be enabled in System Settings → Display & Monitor → Night Light
+
+## Build & install on Arch (CachyOS, Manjaro, EndeavourOS)
+
+```bash
+git clone https://github.com/koconnorgit/SteamOS-wallpaper-engine-kde-plugin.git
+cd SteamOS-wallpaper-engine-kde-plugin
+./install-arch.sh
+```
+
+The script installs build dependencies, builds from source, installs the C++ library system-wide, registers the wallpaper package with `kpackagetool6`, and restarts plasmashell.
+
+---
+
 # wallpaper-engine (kde-/plasma-plugin)
 ## <a href="https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/#Arch">arch</a> <a href="https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/#SteamOS">(SteamOS)</a> + <a href="https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/#apt--debian--ubuntu">Debian</a> (+ Ubuntu, Kali, Deepin, Elementary, Mint etc.), <a href="https://github.com/Deadlydav/wallpaper-engine-kde-nobara">Fedora / Nobara</a>, <a href="https://github.com/slynobody/linux_wallpaper_engine__precompiled/tree/main">other (f.e. hyprland)</a>
 

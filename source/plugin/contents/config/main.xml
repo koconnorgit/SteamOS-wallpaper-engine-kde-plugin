@@ -62,6 +62,26 @@
       <label>Randomize every X minutes</label>
       <default>false</default>
     </entry>
+    <entry name="DayNightSwitch" type="Bool">
+      <label>Switch wallpaper on KWin Night Light day/night transition</label>
+      <default>false</default>
+    </entry>
+    <entry name="DayWallpaperWorkShopId" type="String">
+      <label>Day wallpaper workshopid</label>
+      <default></default>
+    </entry>
+    <entry name="DayWallpaperSource" type="Path">
+      <label>Day wallpaper source</label>
+      <default></default>
+    </entry>
+    <entry name="NightWallpaperWorkShopId" type="String">
+      <label>Night wallpaper workshopid</label>
+      <default></default>
+    </entry>
+    <entry name="NightWallpaperSource" type="Path">
+      <label>Night wallpaper source</label>
+      <default></default>
+    </entry>
     <entry name="NoRandomWhilePaused" type="Bool">
       <label>Prevent randomization while wallpapers are paused</label>
       <default>false</default>

@@ -220,6 +220,38 @@ RowLayout {
                                 onTriggered: picViewLoader.item.toggleFavor(model, index)
                             },
                             Kirigami.Action {
+                                icon.name: cfg_DayWallpaperWorkShopId === workshopid
+                                    ? "weather-clear" : "weather-clear-symbolic"
+                                tooltip: cfg_DayWallpaperWorkShopId === workshopid
+                                    ? "Day wallpaper (click to clear)"
+                                    : "Set as Day wallpaper"
+                                onTriggered: {
+                                    if (cfg_DayWallpaperWorkShopId === workshopid) {
+                                        cfg_DayWallpaperWorkShopId = "";
+                                        cfg_DayWallpaperSource = "";
+                                    } else {
+                                        cfg_DayWallpaperWorkShopId = workshopid;
+                                        cfg_DayWallpaperSource = Common.packWallpaperSource(model);
+                                    }
+                                }
+                            },
+                            Kirigami.Action {
+                                icon.name: cfg_NightWallpaperWorkShopId === workshopid
+                                    ? "weather-clear-night" : "weather-clear-night-symbolic"
+                                tooltip: cfg_NightWallpaperWorkShopId === workshopid
+                                    ? "Night wallpaper (click to clear)"
+                                    : "Set as Night wallpaper"
+                                onTriggered: {
+                                    if (cfg_NightWallpaperWorkShopId === workshopid) {
+                                        cfg_NightWallpaperWorkShopId = "";
+                                        cfg_NightWallpaperSource = "";
+                                    } else {
+                                        cfg_NightWallpaperWorkShopId = workshopid;
+                                        cfg_NightWallpaperSource = Common.packWallpaperSource(model);
+                                    }
+                                }
+                            },
+                            Kirigami.Action {
                                 icon.name: "folder-remote-symbolic"
                                 tooltip: "Open Workshop Link"
                                 enabled: workshopid.match(Common.regex_workshop_online)
@@ -441,14 +473,50 @@ RowLayout {
                         actions: [
                             Kirigami.Action {
                                 id: right_act_favor
-                                
-                                icon.name: right_content.wpmodel.favor 
+
+                                icon.name: right_content.wpmodel.favor
                                     ? "bookmarks-symbolic"
                                     : "bookmark-add-symbolic"
                                 tooltip: right_content.wpmodel.favor
                                     ? 'Remove from favorites'
                                     : 'Add to favorites'
                                 onTriggered: picViewLoader.item.toggleFavor(right_content.wpmodel)
+                            },
+                            Kirigami.Action {
+                                icon.name: cfg_DayWallpaperWorkShopId === right_content.wpmodel.workshopid
+                                    ? "weather-clear" : "weather-clear-symbolic"
+                                tooltip: cfg_DayWallpaperWorkShopId === right_content.wpmodel.workshopid
+                                    ? "Day wallpaper (click to clear)"
+                                    : "Set as Day wallpaper"
+                                enabled: Boolean(right_content.wpmodel.workshopid)
+                                onTriggered: {
+                                    const wid = right_content.wpmodel.workshopid;
+                                    if (cfg_DayWallpaperWorkShopId === wid) {
+                                        cfg_DayWallpaperWorkShopId = "";
+                                        cfg_DayWallpaperSource = "";
+                                    } else {
+                                        cfg_DayWallpaperWorkShopId = wid;
+                                        cfg_DayWallpaperSource = Common.packWallpaperSource(right_content.wpmodel);
+                                    }
+                                }
+                            },
+                            Kirigami.Action {
+                                icon.name: cfg_NightWallpaperWorkShopId === right_content.wpmodel.workshopid
+                                    ? "weather-clear-night" : "weather-clear-night-symbolic"
+                                tooltip: cfg_NightWallpaperWorkShopId === right_content.wpmodel.workshopid
+                                    ? "Night wallpaper (click to clear)"
+                                    : "Set as Night wallpaper"
+                                enabled: Boolean(right_content.wpmodel.workshopid)
+                                onTriggered: {
+                                    const wid = right_content.wpmodel.workshopid;
+                                    if (cfg_NightWallpaperWorkShopId === wid) {
+                                        cfg_NightWallpaperWorkShopId = "";
+                                        cfg_NightWallpaperSource = "";
+                                    } else {
+                                        cfg_NightWallpaperWorkShopId = wid;
+                                        cfg_NightWallpaperSource = Common.packWallpaperSource(right_content.wpmodel);
+                                    }
+                                }
                             },
                             Kirigami.Action {
                                 icon.name: "emblem-symbolic-link"
@@ -459,7 +527,7 @@ RowLayout {
                             Kirigami.Action {
                                 icon.name: "folder-symbolic"
                                 tooltip: "Open Containing Folder"
-                                onTriggered: Qt.openUrlExternally(right_content.wpmodel.path) 
+                                onTriggered: Qt.openUrlExternally(right_content.wpmodel.path)
                             }
                         ]
                     }

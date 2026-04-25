@@ -5,6 +5,7 @@
 #include "SceneBackend.hpp"
 #include "MouseGrabber.hpp"
 #include "TTYSwitchMonitor.hpp"
+#include "DayNightMonitor.hpp"
 #include "PluginInfo.hpp"
 #include "FileHelper.hpp"
 
@@ -23,6 +24,7 @@ public:
         std::setlocale(LC_NUMERIC, "C");
         qmlRegisterType<mpv::MpvObject>(uri, WPVer[0], WPVer[1], "Mpv");
         qmlRegisterType<wekde::TTYSwitchMonitor>(uri, WPVer[0], WPVer[1], "TTYSwitchMonitor");
+        qmlRegisterType<wekde::DayNightMonitor>(uri, WPVer[0], WPVer[1], "DayNightMonitor");
         qmlRegisterType<wekde::FileHelper>(uri, WPVer[0], WPVer[1], "FileHelper");
     }
 };

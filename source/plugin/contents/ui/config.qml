@@ -35,6 +35,11 @@ ColumnLayout {
     property alias  cfg_SwitchTimer:         settingPage.cfg_SwitchTimer
     property alias  cfg_RandomizeWallpaper:  settingPage.cfg_RandomizeWallpaper
     property alias  cfg_NoRandomWhilePaused: settingPage.cfg_NoRandomWhilePaused
+    property alias  cfg_DayNightSwitch:      settingPage.cfg_DayNightSwitch
+    property string cfg_DayWallpaperWorkShopId
+    property string cfg_DayWallpaperSource
+    property string cfg_NightWallpaperWorkShopId
+    property string cfg_NightWallpaperSource
     property alias  cfg_PauseFilterByScreen: settingPage.cfg_PauseFilterByScreen
     property alias  cfg_PauseOnBatPower:     settingPage.cfg_PauseOnBatPower
     property alias  cfg_PauseBatPercent:     settingPage.cfg_PauseBatPercent

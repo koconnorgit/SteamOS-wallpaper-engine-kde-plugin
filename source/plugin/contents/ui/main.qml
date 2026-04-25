@@ -21,6 +21,7 @@ Rectangle {
 
     property bool   randomizeWallpaper: wallpaper.configuration.RandomizeWallpaper
     property bool   noRandomWhilePaused: wallpaper.configuration.NoRandomWhilePaused
+    property bool   dayNightSwitch: wallpaper.configuration.DayNightSwitch
     property bool   mouseInput: wallpaper.configuration.MouseInput
     property bool   mpvStats: wallpaper.configuration.MpvStats
 
@@ -99,6 +100,40 @@ Rectangle {
                 console.log("Waking up (VT switch back)");
                 this.play();
             }
+        }
+    }
+
+    // KWin Night Light day/night transitions
+    DayNightMonitor {
+        id: dayNightMonitor
+        onPhaseChanged: (isDay) => background.applyDayNightWallpaper(isDay)
+    }
+    function applyDayNightWallpaper(isDay) {
+        if (!background.dayNightSwitch) return;
+        const wid = isDay
+            ? wallpaper.configuration.DayWallpaperWorkShopId
+            : wallpaper.configuration.NightWallpaperWorkShopId;
+        const src = isDay
+            ? wallpaper.configuration.DayWallpaperSource
+            : wallpaper.configuration.NightWallpaperSource;
+        if (!wid || !src) return;
+        if (wallpaper.configuration.WallpaperWorkShopId === wid &&
+            wallpaper.configuration.WallpaperSource === src) return;
+        wallpaper.configuration.WallpaperWorkShopId = wid;
+        wallpaper.configuration.WallpaperSource = src;
+    }
+    onDayNightSwitchChanged: {
+        if (background.dayNightSwitch) background.applyDayNightWallpaper(dayNightMonitor.daylight);
+    }
+    Connections {
+        target: wallpaper.configuration
+        function onDayWallpaperSourceChanged() {
+            if (background.dayNightSwitch && dayNightMonitor.daylight)
+                background.applyDayNightWallpaper(true);
+        }
+        function onNightWallpaperSourceChanged() {
+            if (background.dayNightSwitch && !dayNightMonitor.daylight)
+                background.applyDayNightWallpaper(false);
         }
     }
 
@@ -244,7 +279,7 @@ Rectangle {
     }
     Timer {
         id: randomizeTimer
-        running: background.randomizeWallpaper
+        running: background.randomizeWallpaper && !background.dayNightSwitch
         interval: background.switchTimer * 1000 * 60
         repeat: true
         onTriggered: {
