@@ -181,6 +181,41 @@ ColumnLayout {
         schedulePage.openSlotDialog(null, item);
     }
 
+    // Wallpapers the schedule uses, for the badges and the "Scheduled" toggle
+    // on the Wallpapers tab:
+    //   scheduled  every wallpaper some slot will show (its own wallpaper, or
+    //              the members of its playlist)
+    //   active     the subset belonging to the slot in effect right now
+    //   showing    the one on screen per the schedule
+    readonly property var activeSchedule: {
+        const res = { scheduled: {}, active: {}, showing: "" };
+        const conf = root.schedule;
+        if (!conf.enabled) return res;
+        const collect = (slot, into) => {
+            const target = slot.target;
+            if (target.type === 'wallpaper') {
+                into[target.wid] = true;
+            } else if (target.type === 'playlist') {
+                const pl = Sched.findPlaylist(conf, target.id);
+                if (pl) pl.items.forEach(it => { into[it.wid] = true; });
+            }
+        };
+        conf.slots.forEach(slot => collect(slot, res.scheduled));
+        const cur = schedulePage.current;
+        if (cur) {
+            collect(cur.slot, res.active);
+            if (cur.item) res.showing = cur.item.wid;
+        }
+        return res;
+    }
+
+    // "Scheduled" toggle on the Wallpapers tab: list only those wallpapers.
+    // Has no effect while nothing is scheduled.
+    property bool cfg_ScheduledOnly
+    // a string, so the list is only rebuilt when the set really changes
+    readonly property string scheduledIds: Object.keys(activeSchedule.scheduled).sort().join(',')
+    readonly property bool scheduledOnlyActive: cfg_ScheduledOnly && scheduledIds !== ""
+
     // sunrise / sunset times, null while unknown
     property var sunSchedule: null
     readonly property var sunTimes: (sunSchedule && sunSchedule.available && sunSchedule.ready)
@@ -215,6 +250,8 @@ ColumnLayout {
         globalConfigPath: Common.getGlobalConfigPath(cfg_SteamLibraryPath)
         filterStr: cfg_FilterStr
         sortMode: cfg_SortMode
+        restrictToIds: root.scheduledOnlyActive
+        onlyIds: root.scheduledIds
         initItemOp: (item) => {
             if(!root.customConf) return;
             item.favor = root.customConf.favor.has(item.workshopid);

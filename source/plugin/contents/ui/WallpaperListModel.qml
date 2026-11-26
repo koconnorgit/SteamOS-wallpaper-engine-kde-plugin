@@ -11,6 +11,10 @@ Item {
     property string filterStr: ""
     property int sortMode: Common.SortMode.Id
     property bool enabled: true
+    // Optional extra filter: when restrictToIds is set, only wallpapers whose
+    // workshop id appears in the comma-separated onlyIds are listed.
+    property bool restrictToIds: false
+    property string onlyIds: ""
 
     property var initItemOp: null
     property var _initItemOp: Boolean(initItemOp) ? initItemOp : function(){ }
@@ -146,11 +150,12 @@ Item {
             root.modelStartSync();
             return new Promise((resolve, reject) => {
                 const filter = Common.filterModel.genFilter(filterstr);
+                const only = root.restrictToIds ? new Set(root.onlyIds.split(',')) : null;
                 const model = listModel;
                 data.sort(genSortCmp(sortMode));
                 model.clear();
                 data.forEach(function(el) {
-                    if(filter(el))
+                    if(filter(el) && (!only || only.has(el.workshopid)))
                         model.append(el);
                 });
                 resolve();
@@ -241,6 +246,8 @@ Item {
             return Promise.resolve();
         });
         this.sortModeChanged.connect(this.filterStrChanged);
+        this.restrictToIdsChanged.connect(this.filterStrChanged);
+        this.onlyIdsChanged.connect(() => { if(root.restrictToIds) root.filterStrChanged(); });
         this.enabledChanged.connect(this.refresh.bind(this));
 
         const fc = this.readfile;

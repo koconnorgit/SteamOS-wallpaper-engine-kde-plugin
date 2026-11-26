@@ -181,6 +181,17 @@ RowLayout {
                             }))
                         },
                         Kirigami.Action {
+                            text: 'Scheduled'
+                            icon.name: "view-calendar-day"
+                            tooltip: root.scheduledIds !== ""
+                                ? "Show only the wallpapers used by the schedule"
+                                : "The schedule is off or has no wallpapers"
+                            checkable: true
+                            checked: cfg_ScheduledOnly
+                            enabled: root.scheduledIds !== "" || cfg_ScheduledOnly
+                            onTriggered: cfg_ScheduledOnly = checked
+                        },
+                        Kirigami.Action {
                             id: action_cb_sort
                             text: model[currentIndex].short
                             icon.name: "view-sort-descending-symbolic"
@@ -315,6 +326,32 @@ RowLayout {
                                 asynchronous: true
                                 smooth: true
                                 visible: Boolean(preview)
+                            }
+                            // badge: this wallpaper is used by the schedule.
+                            // Highlighted while its slot is the one in effect,
+                            // with a play icon on the one being shown.
+                            Rectangle {
+                                readonly property bool showing: root.activeSchedule.showing === workshopid
+                                readonly property bool active: root.activeSchedule.active[workshopid] === true
+                                visible: root.activeSchedule.scheduled[workshopid] === true
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.margins: Kirigami.Units.smallSpacing
+                                width: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing * 2
+                                height: width
+                                radius: width / 2
+                                color: active ? Kirigami.Theme.highlightColor : Kirigami.Theme.backgroundColor
+                                border.color: active ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                border.width: 1
+
+                                Kirigami.Icon {
+                                    anchors.centerIn: parent
+                                    width: Kirigami.Units.iconSizes.small
+                                    height: width
+                                    source: parent.showing ? "media-playback-start-symbolic" : "view-calendar-day"
+                                    color: parent.active ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                    isMask: true
+                                }
                             }
                         }
                         onClicked: {

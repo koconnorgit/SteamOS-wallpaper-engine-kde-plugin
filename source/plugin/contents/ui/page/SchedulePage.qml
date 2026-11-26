@@ -33,7 +33,8 @@ Flickable {
 
     Timer {
         interval: 20000
-        running: schedulePage.visible
+        // keeps running on other tabs: the Wallpapers tab badges use `current`
+        running: true
         repeat: true
         triggeredOnStart: true
         onTriggered: schedulePage.now = Date.now()
