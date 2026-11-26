@@ -1,4 +1,5 @@
 import QtQuick 2.6
+import QtQml
 import QtQuick.Controls 2.3
 import QtQuick.Controls 2.3 as QQC
 import QtQuick.Window 2.0 // for Screen
@@ -10,6 +11,7 @@ import "../components"
 
 import "../js/utils.mjs" as Utils
 import "../js/bbcode.mjs" as BBCode
+import "../js/schedule.mjs" as Sched
 
 import org.kde.plasma.core 2.0 as PlasmaCore
 import org.kde.plasma.components 3.0 as PlasmaComponents
@@ -26,6 +28,68 @@ RowLayout {
 
     function saveConfig() {
         right_opts.save_changes();
+    }
+
+    // the wallpaper highlighted in the grid, as a schedule entry (or null)
+    function selectedScheduleItem() {
+        const model = picViewLoader.item ? picViewLoader.item.currentModel : null;
+        return root.scheduleItem(model);
+    }
+
+    // "Add to playlist / use for schedule slot" menu shared by every card
+    QQC.Menu {
+        id: scheduleMenu
+        property var wp: null
+
+        function openFor(item) {
+            if (!item) return;
+            wp = item;
+            popup();
+        }
+
+        QQC.Menu {
+            id: playlistSubMenu
+            title: "Add to playlist"
+            Instantiator {
+                model: root.schedule.playlists
+                delegate: QQC.MenuItem {
+                    text: modelData.name
+                    checkable: true
+                    checked: root.playlistHas(modelData, scheduleMenu.wp)
+                    onTriggered: root.togglePlaylistItem(modelData.id, scheduleMenu.wp)
+                }
+                onObjectAdded: (index, object) => playlistSubMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => playlistSubMenu.removeItem(object)
+            }
+            QQC.MenuSeparator { visible: root.schedule.playlists.length > 0 }
+            QQC.MenuItem {
+                text: "New playlist"
+                icon.name: "list-add-symbolic"
+                onTriggered: root.newPlaylist(scheduleMenu.wp)
+            }
+        }
+        QQC.Menu {
+            id: slotSubMenu
+            title: "Use for schedule slot"
+            Instantiator {
+                model: root.schedule.slots
+                delegate: QQC.MenuItem {
+                    text: Sched.describeTrigger(modelData.trigger)
+                    checkable: true
+                    checked: modelData.target.type === 'wallpaper' && scheduleMenu.wp
+                        && modelData.target.wid === scheduleMenu.wp.wid
+                    onTriggered: root.setSlotWallpaper(modelData.id, scheduleMenu.wp)
+                }
+                onObjectAdded: (index, object) => slotSubMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => slotSubMenu.removeItem(object)
+            }
+            QQC.MenuSeparator { visible: root.schedule.slots.length > 0 }
+            QQC.MenuItem {
+                text: "New slot…"
+                icon.name: "list-add-symbolic"
+                onTriggered: root.newSlotFor(scheduleMenu.wp)
+            }
+        }
     }
     
     Control {
@@ -220,36 +284,9 @@ RowLayout {
                                 onTriggered: picViewLoader.item.toggleFavor(model, index)
                             },
                             Kirigami.Action {
-                                icon.name: cfg_DayWallpaperWorkShopId === workshopid
-                                    ? "weather-clear" : "weather-clear-symbolic"
-                                tooltip: cfg_DayWallpaperWorkShopId === workshopid
-                                    ? "Day wallpaper (click to clear)"
-                                    : "Set as Day wallpaper"
-                                onTriggered: {
-                                    if (cfg_DayWallpaperWorkShopId === workshopid) {
-                                        cfg_DayWallpaperWorkShopId = "";
-                                        cfg_DayWallpaperSource = "";
-                                    } else {
-                                        cfg_DayWallpaperWorkShopId = workshopid;
-                                        cfg_DayWallpaperSource = Common.packWallpaperSource(model);
-                                    }
-                                }
-                            },
-                            Kirigami.Action {
-                                icon.name: cfg_NightWallpaperWorkShopId === workshopid
-                                    ? "weather-clear-night" : "weather-clear-night-symbolic"
-                                tooltip: cfg_NightWallpaperWorkShopId === workshopid
-                                    ? "Night wallpaper (click to clear)"
-                                    : "Set as Night wallpaper"
-                                onTriggered: {
-                                    if (cfg_NightWallpaperWorkShopId === workshopid) {
-                                        cfg_NightWallpaperWorkShopId = "";
-                                        cfg_NightWallpaperSource = "";
-                                    } else {
-                                        cfg_NightWallpaperWorkShopId = workshopid;
-                                        cfg_NightWallpaperSource = Common.packWallpaperSource(model);
-                                    }
-                                }
+                                icon.name: "view-calendar-day-symbolic"
+                                tooltip: "Add to a playlist or schedule slot"
+                                onTriggered: scheduleMenu.openFor(root.scheduleItem(model))
                             },
                             Kirigami.Action {
                                 icon.name: "folder-remote-symbolic"
@@ -283,6 +320,9 @@ RowLayout {
                         onClicked: {
                             cfg_WallpaperSource = Common.packWallpaperSource(model);
                             cfg_WallpaperWorkShopId = workshopid;
+                            // tell the schedule this was a deliberate pick
+                            root.userPicked = true;
+                            cfg_ScheduleManualPick = String(Date.now());
                             view.currentIndex = index;
                         }
                     }
@@ -483,40 +523,10 @@ RowLayout {
                                 onTriggered: picViewLoader.item.toggleFavor(right_content.wpmodel)
                             },
                             Kirigami.Action {
-                                icon.name: cfg_DayWallpaperWorkShopId === right_content.wpmodel.workshopid
-                                    ? "weather-clear" : "weather-clear-symbolic"
-                                tooltip: cfg_DayWallpaperWorkShopId === right_content.wpmodel.workshopid
-                                    ? "Day wallpaper (click to clear)"
-                                    : "Set as Day wallpaper"
+                                icon.name: "view-calendar-day-symbolic"
+                                tooltip: "Add to a playlist or schedule slot"
                                 enabled: Boolean(right_content.wpmodel.workshopid)
-                                onTriggered: {
-                                    const wid = right_content.wpmodel.workshopid;
-                                    if (cfg_DayWallpaperWorkShopId === wid) {
-                                        cfg_DayWallpaperWorkShopId = "";
-                                        cfg_DayWallpaperSource = "";
-                                    } else {
-                                        cfg_DayWallpaperWorkShopId = wid;
-                                        cfg_DayWallpaperSource = Common.packWallpaperSource(right_content.wpmodel);
-                                    }
-                                }
-                            },
-                            Kirigami.Action {
-                                icon.name: cfg_NightWallpaperWorkShopId === right_content.wpmodel.workshopid
-                                    ? "weather-clear-night" : "weather-clear-night-symbolic"
-                                tooltip: cfg_NightWallpaperWorkShopId === right_content.wpmodel.workshopid
-                                    ? "Night wallpaper (click to clear)"
-                                    : "Set as Night wallpaper"
-                                enabled: Boolean(right_content.wpmodel.workshopid)
-                                onTriggered: {
-                                    const wid = right_content.wpmodel.workshopid;
-                                    if (cfg_NightWallpaperWorkShopId === wid) {
-                                        cfg_NightWallpaperWorkShopId = "";
-                                        cfg_NightWallpaperSource = "";
-                                    } else {
-                                        cfg_NightWallpaperWorkShopId = wid;
-                                        cfg_NightWallpaperSource = Common.packWallpaperSource(right_content.wpmodel);
-                                    }
-                                }
+                                onTriggered: scheduleMenu.openFor(selectedScheduleItem())
                             },
                             Kirigami.Action {
                                 icon.name: "emblem-symbolic-link"

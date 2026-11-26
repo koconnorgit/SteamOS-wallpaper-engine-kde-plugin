@@ -16,6 +16,7 @@ public:
 
     // File operations
     Q_INVOKABLE QByteArray readFile(const QString& path);
+    Q_INVOKABLE bool exists(const QString& path);
     Q_INVOKABLE qint64 getDirSize(const QString& path, int depth = 3);
     Q_INVOKABLE QVariantMap getFolderList(const QString& path, const QVariantMap& opt = {});
 

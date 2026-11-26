@@ -2,11 +2,26 @@
 
 # Fork additions
 
-This fork (koconnorgit) adds **Day / Night wallpaper switching** driven by KWin Night Light. With the toggle on, the wallpaper swaps between user-assigned Day and Night wallpapers when KWin reports a sunrise/sunset transition (independent of global theme switching).
+This fork (koconnorgit) adds a **wallpaper schedule**: each monitor can change its wallpaper at set times of day or relative to sunrise and sunset, and rotate through playlists.
 
-- Settings tab → Common Option → **Day / Night Wallpaper** toggle
-- Wallpapers tab → sun / moon icons on each card (and in the right-side detail panel) to assign or clear the Day / Night wallpaper
-- Requires KWin Night Light to be enabled in System Settings → Display & Monitor → Night Light
+- **Slots** say when to change. A slot fires at a clock time (13:00) or at sunrise/sunset with an optional offset (1 h after sunset, 30 min before sunrise), and stays in effect until the next slot fires.
+- A slot shows either **one wallpaper** or a **playlist**. A playlist rotates through its wallpapers, in order or shuffled, on its own interval for as long as its slot is in effect.
+- Schedules and playlists are **per monitor**; set them up in each screen's wallpaper settings.
+
+Where things are:
+
+- **Schedule tab**: turn the schedule on, add and edit slots, create and reorder playlists.
+- **Wallpapers tab**: the calendar button on each card (and in the detail panel) adds that wallpaper to a playlist or assigns it to a slot.
+
+Behaviour worth knowing:
+
+- Sunrise and sunset come from Plasma's day/night cycle (the location or custom times set under System Settings → Display & Monitor → Night Light). This needs Plasma 6.5 or newer; on older versions clock-time slots still work.
+- Picking a wallpaper by hand while the schedule is on keeps it until the next slot fires. Editing the schedule resumes it immediately.
+- A wallpaper paused behind a fullscreen or maximized window (per the Pause setting) is not changed while paused; it catches up when it resumes.
+- Wallpapers that have been unsubscribed are skipped.
+- The earlier Day / Night switch is converted automatically into a sunrise slot and a sunset slot. The Randomize timer has been removed; use a shuffled playlist instead.
+
+Tests for the schedule logic: `node --test source/tests/schedule.test.mjs`
 
 ## Build & install on Arch (CachyOS, Manjaro, EndeavourOS)
 

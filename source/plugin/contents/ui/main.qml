@@ -4,6 +4,8 @@ import QtQuick.Window
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasmoid
 
+import "js/schedule.mjs" as Sched
+
 WallpaperItem {
 Rectangle {
     id: background
@@ -16,12 +18,8 @@ Rectangle {
     property string filterStr: wallpaper.configuration.FilterStr
 
     property int    videoBackend: wallpaper.configuration.VideoBackend
-    property int    switchTimer: wallpaper.configuration.SwitchTimer
     property int    fps: wallpaper.configuration.Fps
 
-    property bool   randomizeWallpaper: wallpaper.configuration.RandomizeWallpaper
-    property bool   noRandomWhilePaused: wallpaper.configuration.NoRandomWhilePaused
-    property bool   dayNightSwitch: wallpaper.configuration.DayNightSwitch
     property bool   mouseInput: wallpaper.configuration.MouseInput
     property bool   mpvStats: wallpaper.configuration.MpvStats
 
@@ -103,38 +101,123 @@ Rectangle {
         }
     }
 
-    // KWin Night Light day/night transitions
-    DayNightMonitor {
-        id: dayNightMonitor
-        onPhaseChanged: (isDay) => background.applyDayNightWallpaper(isDay)
+    // ---- wallpaper schedule ----
+    // Slots fire at clock times or relative to sunrise/sunset and pick a
+    // wallpaper or a rotating playlist; see js/schedule.mjs. What should be
+    // showing is recomputed from the wall clock on every evaluation, so
+    // nothing but a manual-pick hold needs to be remembered.
+    property var    scheduleConf: Sched.parse(wallpaper.configuration.ScheduleConf)
+    // identifies the schedule result that was last applied
+    property string scheduleKey: ""
+    // Config values as last acted on, to tell what the settings dialog changed.
+    // Change handlers on bound properties are used rather than Connections:
+    // in testing, Connections handlers never fired for the config map's
+    // capitalised keys.
+    property string scheduleSeenConf: ""
+    property string scheduleSeenPick: ""
+    readonly property string scheduleConfStr: wallpaper.configuration.ScheduleConf
+    readonly property string schedulePickStr: wallpaper.configuration.ScheduleManualPick
+    onScheduleConfStrChanged: Qt.callLater(background.scheduleConfigChanged)
+    onSchedulePickStrChanged: Qt.callLater(background.scheduleConfigChanged)
+
+    SunSchedule {
+        id: sunSchedule
+        onReadyChanged: background.evaluateSchedule()
+        onScheduleChanged: background.evaluateSchedule()
     }
-    function applyDayNightWallpaper(isDay) {
-        if (!background.dayNightSwitch) return;
-        const wid = isDay
-            ? wallpaper.configuration.DayWallpaperWorkShopId
-            : wallpaper.configuration.NightWallpaperWorkShopId;
-        const src = isDay
-            ? wallpaper.configuration.DayWallpaperSource
-            : wallpaper.configuration.NightWallpaperSource;
-        if (!wid || !src) return;
-        if (wallpaper.configuration.WallpaperWorkShopId === wid &&
-            wallpaper.configuration.WallpaperSource === src) return;
-        wallpaper.configuration.WallpaperWorkShopId = wid;
-        wallpaper.configuration.WallpaperSource = src;
+    function scheduleSunTimes() {
+        return { sunrises: sunSchedule.sunrises, sunsets: sunSchedule.sunsets };
     }
-    onDayNightSwitchChanged: {
-        if (background.dayNightSwitch) background.applyDayNightWallpaper(dayNightMonitor.daylight);
+    function scheduleItemAvailable(item) {
+        const dir = Common.wallpaperDirOfSource(item.source);
+        return Boolean(dir) && pyext.exists(dir);
+    }
+    function scheduleHoldUntil() {
+        return Number(wallpaper.configuration.ScheduleHoldUntil) || 0;
+    }
+    function setScheduleHoldUntil(time) {
+        const value = time ? String(time) : "";
+        if (wallpaper.configuration.ScheduleHoldUntil !== value)
+            wallpaper.configuration.ScheduleHoldUntil = value;
+    }
+
+    function evaluateSchedule() {
+        scheduleTimer.stop();
+        const conf = background.scheduleConf;
+        if (!conf.enabled || conf.slots.length === 0) return;
+        // wait for real sun times rather than acting on the placeholder ones
+        if (Sched.usesSun(conf) && !sunSchedule.ready) return;
+
+        const now = Date.now();
+        const res = Sched.resolve(conf, now, scheduleSunTimes(), scheduleItemAvailable);
+        let wake = res ? res.nextChangeAt : null;
+
+        const hold = scheduleHoldUntil();
+        if (hold > now) {
+            // a wallpaper picked by hand stays until the next slot fires
+            if (wake === null || hold < wake) wake = hold;
+        } else {
+            if (hold) setScheduleHoldUntil(0);
+            // Changes are deferred while the wallpaper is paused (e.g. behind
+            // a fullscreen window); okChanged brings us back here.
+            if (res && res.item && res.key !== background.scheduleKey && background.ok) {
+                background.scheduleKey = res.key;
+                if (wallpaper.configuration.WallpaperWorkShopId !== res.item.wid ||
+                    wallpaper.configuration.WallpaperSource !== res.item.source) {
+                    console.log(`schedule: ${Sched.describeTrigger(res.slot.trigger)} -> ${res.item.wid}`);
+                    wallpaper.configuration.WallpaperWorkShopId = res.item.wid;
+                    wallpaper.configuration.WallpaperSource = res.item.source;
+                }
+            }
+        }
+
+        // Re-check at least once a minute: QML timers do not account for
+        // time spent suspended, and the system clock can be changed.
+        const delay = wake === null ? 60000 : wake - now + 100;
+        scheduleTimer.interval = Math.max(1000, Math.min(60000, delay));
+        scheduleTimer.start();
+    }
+    Timer {
+        id: scheduleTimer
+        repeat: false
+        onTriggered: background.evaluateSchedule()
+    }
+
+    // The settings dialog writes all its values in one go; look at them together.
+    function scheduleConfigChanged() {
+        const confStr = wallpaper.configuration.ScheduleConf;
+        const pick = wallpaper.configuration.ScheduleManualPick;
+        const edited = confStr !== background.scheduleSeenConf;
+        const picked = pick !== background.scheduleSeenPick;
+        background.scheduleSeenConf = confStr;
+        background.scheduleSeenPick = pick;
+
+        if (edited) {
+            // an edited schedule takes effect right away
+            setScheduleHoldUntil(0);
+            background.scheduleKey = "";
+        } else if (picked) {
+            const res = Sched.resolve(background.scheduleConf, Date.now(), scheduleSunTimes(), scheduleItemAvailable);
+            setScheduleHoldUntil(res && res.nextSlotAt ? res.nextSlotAt : 0);
+        }
+        evaluateSchedule();
     }
     Connections {
-        target: wallpaper.configuration
-        function onDayWallpaperSourceChanged() {
-            if (background.dayNightSwitch && dayNightMonitor.daylight)
-                background.applyDayNightWallpaper(true);
-        }
-        function onNightWallpaperSourceChanged() {
-            if (background.dayNightSwitch && !dayNightMonitor.daylight)
-                background.applyDayNightWallpaper(false);
-        }
+        target: ttyMonitor
+        function onTtySwitch(sleep) { if (!sleep) background.evaluateSchedule(); }
+    }
+    onOkChanged: if (background.ok) background.evaluateSchedule()
+
+    // One-time conversion of the old Day/Night switch into two schedule slots.
+    function migrateLegacySchedule() {
+        const c = wallpaper.configuration;
+        if (!c.DayNightSwitch) return;
+        c.DayNightSwitch = false;
+        if (c.ScheduleConf) return;
+        const conf = Sched.fromDayNight(
+            { wid: c.DayWallpaperWorkShopId, source: String(c.DayWallpaperSource) },
+            { wid: c.NightWallpaperWorkShopId, source: String(c.NightWallpaperSource) });
+        if (conf.enabled) c.ScheduleConf = Sched.serialize(conf);
     }
 
     property string nowBackend: ""
@@ -258,38 +341,6 @@ Rectangle {
     Pyext {
         id: pyext
     }
-    WallpaperListModel {
-        id: wpListModel
-        enabled: background.randomizeWallpaper
-        workshopDirs: Common.getProjectDirs(background.steamlibrary)
-        globalConfigPath: Common.getGlobalConfigPath(background.steamlibrary)
-        filterStr: background.filterStr
-        initItemOp: (item) => {
-            if(!background.customConf) return;
-            item.favor = background.customConf.favor.has(item.workshopid);
-        }
-        readfile: pyext.readfile
-
-        function changeWallpaper(index) {
-            if(this.model.count === 0) return;
-            const model = this.model.get(index);
-            wallpaper.configuration.WallpaperWorkShopId = model.workshopid;
-            wallpaper.configuration.WallpaperSource = Common.packWallpaperSource(model);
-        }
-    }
-    Timer {
-        id: randomizeTimer
-        running: background.randomizeWallpaper && !background.dayNightSwitch
-        interval: background.switchTimer * 1000 * 60
-        repeat: true
-        onTriggered: {
-            if(!(background.noRandomWhilePaused && !background.ok)) {
-                const i = Math.round(Math.random() * wpListModel.model.count);
-                wpListModel.changeWallpaper(i);
-            }
-        }
-    }
-
     // lauch pause time to avoid freezing
     Timer {
         id: lauchPauseTimer
@@ -429,7 +480,11 @@ Rectangle {
         background.sourceChanged.connect(applySource);
 
         lauchPauseTimer.start();
-        randomizeTimer.start();
+
+        migrateLegacySchedule();
+        scheduleSeenConf = wallpaper.configuration.ScheduleConf;
+        scheduleSeenPick = wallpaper.configuration.ScheduleManualPick;
+        evaluateSchedule();
     }
 }
 }

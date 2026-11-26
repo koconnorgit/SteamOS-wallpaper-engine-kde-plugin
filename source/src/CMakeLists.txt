@@ -14,7 +14,7 @@ add_library(${PROJECT_NAME}
 	plugin.cpp
 	MouseGrabber.cpp
 	TTYSwitchMonitor.cpp
-	DayNightMonitor.cpp
+	SunSchedule.cpp
 	PluginInfo.cpp
 	FileHelper.cpp
 	qmldir
@@ -29,6 +29,17 @@ target_link_libraries(${PROJECT_NAME}
 	Qt::Core
 	Qt::DBus
 )
+# Sunrise/sunset times for the wallpaper schedule (Plasma 6.5+). Without it
+# the plugin still builds, but sunrise/sunset slots are unavailable.
+find_package(KNightTime QUIET)
+if(KNightTime_FOUND)
+	target_link_libraries(${PROJECT_NAME} PRIVATE KNightTime)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE WEKDE_HAVE_KNIGHTTIME)
+	message(STATUS "KNightTime found: sunrise/sunset schedule slots enabled")
+else()
+	message(STATUS "KNightTime not found: sunrise/sunset schedule slots disabled")
+endif()
+
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 set_target_properties(${PROJECT_NAME}
                        PROPERTIES LINK_FLAGS "-Wl,--exclude-libs,ALL")

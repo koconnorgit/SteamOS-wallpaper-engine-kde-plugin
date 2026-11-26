@@ -42,6 +42,8 @@ QByteArray FileHelper::readFile(const QString& path) {
     return file.readAll();
 }
 
+bool FileHelper::exists(const QString& path) { return QFileInfo::exists(path); }
+
 qint64 FileHelper::getDirSize(const QString& path, int depth) {
     qint64 totalSize = 0;
     QDir dir(path);

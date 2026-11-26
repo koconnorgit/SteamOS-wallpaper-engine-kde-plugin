@@ -1,3 +1,4 @@
 WallpaperPage WallpaperPage.qml
+SchedulePage SchedulePage.qml
 SettingPage SettingPage.qml
 AboutPage AboutPage.qml

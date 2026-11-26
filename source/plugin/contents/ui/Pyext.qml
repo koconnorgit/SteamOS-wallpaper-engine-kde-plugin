@@ -37,6 +37,11 @@ Item {
         return _makePromise(data);
     }
 
+    // Synchronous: true if the file or directory exists
+    function exists(path) {
+        return fileHelper.exists(path);
+    }
+
     function get_dir_size(path, depth) {
         if (depth === undefined) depth = 3;
         const size = fileHelper.getDirSize(path, depth);

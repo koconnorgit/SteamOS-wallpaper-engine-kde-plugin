@@ -6,6 +6,7 @@ import org.kde.plasma.components 3.0 as PlasmaComponents
 import org.kde.kirigami 2.4 as Kirigami
 
 import "page"
+import "js/schedule.mjs" as Sched
 
 ColumnLayout {
     id: root
@@ -32,14 +33,6 @@ ColumnLayout {
     property alias  cfg_MuteAudio:           settingPage.cfg_MuteAudio
     property alias  cfg_MouseInput:          settingPage.cfg_MouseInput
     property alias  cfg_ResumeTime:          settingPage.cfg_ResumeTime
-    property alias  cfg_SwitchTimer:         settingPage.cfg_SwitchTimer
-    property alias  cfg_RandomizeWallpaper:  settingPage.cfg_RandomizeWallpaper
-    property alias  cfg_NoRandomWhilePaused: settingPage.cfg_NoRandomWhilePaused
-    property alias  cfg_DayNightSwitch:      settingPage.cfg_DayNightSwitch
-    property string cfg_DayWallpaperWorkShopId
-    property string cfg_DayWallpaperSource
-    property string cfg_NightWallpaperWorkShopId
-    property string cfg_NightWallpaperSource
     property alias  cfg_PauseFilterByScreen: settingPage.cfg_PauseFilterByScreen
     property alias  cfg_PauseOnBatPower:     settingPage.cfg_PauseOnBatPower
     property alias  cfg_PauseBatPercent:     settingPage.cfg_PauseBatPercent
@@ -112,6 +105,110 @@ ColumnLayout {
         wallpaperPage.saveConfig();
     }
 
+    // ---- wallpaper schedule (slots and playlists, see js/schedule.mjs) ----
+    property string cfg_ScheduleConf
+    // bumped whenever a wallpaper is picked by hand, so the running wallpaper
+    // can tell a deliberate pick from a value this dialog merely wrote back
+    property string cfg_ScheduleManualPick
+    property bool   userPicked: false
+
+    readonly property var schedule: Sched.parse(cfg_ScheduleConf)
+
+    function updateSchedule(change) {
+        const conf = Sched.clone(root.schedule);
+        change(conf);
+        cfg_ScheduleConf = Sched.serialize(conf);
+    }
+    // schedule entry for a wallpaper from the list model
+    function scheduleItem(model) {
+        if (!model || !model.workshopid) return null;
+        const source = Common.packWallpaperSource(model);
+        if (!source) return null;
+        return {
+            wid: model.workshopid,
+            source: source,
+            title: model.title || model.workshopid,
+            preview: model.preview || ''
+        };
+    }
+    function schedulePreview(item) {
+        if (!item || !item.preview) return '';
+        const path = Common.unpackWallpaperSource(item.source).path;
+        return path.substring(0, path.lastIndexOf('/') + 1) + item.preview;
+    }
+    function scheduleItemExists(item) {
+        try {
+            return pyext.exists(Common.wallpaperDirOfSource(item.source));
+        } catch (e) {
+            return true;
+        }
+    }
+    function playlistHas(playlist, item) {
+        return Boolean(item) && playlist.items.some(it => it.wid === item.wid);
+    }
+    function togglePlaylistItem(playlistId, item) {
+        if (!item) return;
+        updateSchedule(conf => {
+            const pl = Sched.findPlaylist(conf, playlistId);
+            if (!pl) return;
+            const at = pl.items.findIndex(it => it.wid === item.wid);
+            if (at >= 0) pl.items.splice(at, 1);
+            else pl.items.push(item);
+        });
+    }
+    function newPlaylist(item) {
+        const id = Sched.newId('p');
+        updateSchedule(conf => {
+            conf.playlists.push({
+                id: id,
+                name: `Playlist ${conf.playlists.length + 1}`,
+                order: 'sequential',
+                interval: 30,
+                items: item ? [item] : []
+            });
+        });
+        return id;
+    }
+    function setSlotWallpaper(slotId, item) {
+        if (!item) return;
+        updateSchedule(conf => {
+            const slot = conf.slots.find(s => s.id === slotId);
+            if (slot) slot.target = Object.assign({ type: 'wallpaper' }, item);
+        });
+    }
+    function newSlotFor(item) {
+        bar.currentIndex = 1;
+        schedulePage.openSlotDialog(null, item);
+    }
+
+    // sunrise / sunset times, null while unknown
+    property var sunSchedule: null
+    readonly property var sunTimes: (sunSchedule && sunSchedule.available && sunSchedule.ready)
+        ? ({ sunrises: sunSchedule.sunrises, sunsets: sunSchedule.sunsets })
+        : null
+    Component.onCompleted: {
+        if (!libcheck.wallpaper) return;
+        try {
+            sunSchedule = Qt.createQmlObject(`
+                import QtQuick 2.0;
+                import com.github.catsout.wallpaperEngineKde 1.2
+                SunSchedule {}
+            `, root);
+        } catch (e) {
+            console.error("SunSchedule is not available; rebuild the plugin library", e);
+        }
+    }
+
+    // While this dialog is open the schedule may change the wallpaper. Follow
+    // it, so that applying other settings does not put the old one back.
+    readonly property string liveWallpaperSource: wallpaperConfiguration
+        ? String(wallpaperConfiguration.WallpaperSource) : ""
+    onLiveWallpaperSourceChanged: {
+        if (root.userPicked || !wallpaperConfiguration || !liveWallpaperSource) return;
+        cfg_WallpaperWorkShopId = wallpaperConfiguration.WallpaperWorkShopId;
+        cfg_WallpaperSource = liveWallpaperSource;
+    }
+
     WallpaperListModel {
         id: wpListModel
         workshopDirs: Common.getProjectDirs(cfg_SteamLibraryPath)
@@ -138,9 +235,12 @@ ColumnLayout {
     // Content
     PlasmaComponents.TabBar {
         id: bar
-        implicitWidth: font.pixelSize*8 * 3
+        implicitWidth: font.pixelSize*8 * 4
         PlasmaComponents.TabButton {
             text: "Wallpapers"
+        }
+        PlasmaComponents.TabButton {
+            text: "Schedule"
         }
         PlasmaComponents.TabButton {
             text: "Settings"
@@ -157,6 +257,10 @@ ColumnLayout {
 
         WallpaperPage {
             id: wallpaperPage
+        }
+
+        SchedulePage {
+            id: schedulePage
         }
 
         SettingPage {

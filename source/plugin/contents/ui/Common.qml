@@ -241,6 +241,14 @@ QtObject {
         };
     }
 
+    // Native path of the folder a packed wallpaper source lives in. The file
+    // named in a source need not exist itself (scenes name scene.json but are
+    // shipped as scene.pkg), so existence checks should use the folder.
+    function wallpaperDirOfSource(source) {
+        const path = urlNative(unpackWallpaperSource(String(source)).path);
+        return path.substring(0, path.lastIndexOf('/'));
+    }
+
     function loadCustomConf(data) {
         const conf = {
             favor: new Set()

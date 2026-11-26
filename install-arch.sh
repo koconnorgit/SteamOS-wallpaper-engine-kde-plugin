@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build & install on Arch (and Arch-based: CachyOS, EndeavourOS, Manjaro).
-# Builds the C++ wallpaper plugin from source (so the DayNightMonitor and
+# Builds the C++ wallpaper plugin from source (so the schedule support and
 # any other custom changes in this fork are included) and installs the
 # Plasma 6 wallpaper package both system-wide and to the user's
 # ~/.local/share/plasma/wallpapers directory.
@@ -14,7 +14,7 @@ echo ">>> Installing build dependencies (sudo required)"
 sudo pacman -S --needed --noconfirm \
     base-devel cmake ninja extra-cmake-modules \
     qt6-declarative qt6-websockets qt6-webchannel \
-    libplasma kpackage \
+    libplasma kpackage knighttime \
     mpv lz4 vulkan-headers \
     gst-libav
 

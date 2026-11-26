@@ -24,10 +24,6 @@ Flickable {
     property alias cfg_MuteAudio: ckbox_muteAudio.checked
     property alias cfg_MouseInput: ckbox_mouseInput.checked
     property alias cfg_ResumeTime: resumeSpin.value
-    property alias cfg_SwitchTimer: randomSpin.value
-    property alias cfg_RandomizeWallpaper: ckbox_randomizeWallpaper.checked
-    property alias cfg_NoRandomWhilePaused: ckbox_noRandomWhilePaused.checked
-    property alias cfg_DayNightSwitch: ckbox_dayNightSwitch.checked
     property alias cfg_PauseFilterByScreen: ckbox_pauseFilterByScreen.checked
 
     property alias cfg_PauseOnBatPower: chkbox_pauseOnBatPower.checked
@@ -36,15 +32,6 @@ Flickable {
 
     Layout.fillWidth: true
     ScrollBar.vertical: ScrollBar { id: scrollbar }
-
-    property var dayNightMonitor: {
-        if (!libcheck.wallpaper) return null;
-        return Qt.createQmlObject(`
-            import QtQuick 2.0;
-            import com.github.catsout.wallpaperEngineKde 1.2
-            DayNightMonitor {}
-        `, settingTab);
-    }
 
     contentWidth: width - (scrollbar.visible ? scrollbar.width : 0)
     contentHeight: contentItem.childrenRect.height
@@ -183,119 +170,6 @@ Flickable {
                     }
                 }
             }
-            OptionItem {
-                text: 'Day / Night Wallpaper'
-                text_color: Kirigami.Theme.textColor
-                icon: '../../images/time.svg'
-                actor: Switch {
-                    id: ckbox_dayNightSwitch
-                    enabled: settingTab.dayNightMonitor !== null && settingTab.dayNightMonitor.available && settingTab.dayNightMonitor.enabled
-                }
-
-                contentBottom: ColumnLayout {
-                    Text {
-                        Layout.fillWidth: true
-                        color: Kirigami.Theme.disabledTextColor
-                        wrapMode: Text.Wrap
-                        text: "Switch wallpaper when KWin Night Light transitions between day and night. " +
-                              "Pick a Day and Night wallpaper from the Wallpapers tab using the sun/moon icons."
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        color: Kirigami.Theme.negativeTextColor
-                        wrapMode: Text.Wrap
-                        visible: !(settingTab.dayNightMonitor !== null && settingTab.dayNightMonitor.available && settingTab.dayNightMonitor.enabled)
-                        text: "KWin Night Light is not enabled. Open System Settings → Display & Monitor → Night Light " +
-                              "and set it to Sunset to Sunrise (or Custom Times). Color temperature can be left at 6500K."
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: ckbox_dayNightSwitch.checked
-                        Label { text: "Currently:"; color: Kirigami.Theme.textColor }
-                        Label {
-                            text: (settingTab.dayNightMonitor !== null && settingTab.dayNightMonitor.daylight) ? "Day" : "Night"
-                            color: Kirigami.Theme.activeTextColor
-                            font.bold: true
-                        }
-                        Item { Layout.fillWidth: true }
-                    }
-                    GridLayout {
-                        Layout.fillWidth: true
-                        visible: ckbox_dayNightSwitch.checked
-                        columns: 2
-                        columnSpacing: 8
-                        rowSpacing: 4
-                        Label { text: "Day:"; color: Kirigami.Theme.textColor }
-                        Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideMiddle
-                            color: cfg_DayWallpaperWorkShopId
-                                ? Kirigami.Theme.textColor
-                                : Kirigami.Theme.negativeTextColor
-                            text: cfg_DayWallpaperWorkShopId
-                                ? cfg_DayWallpaperWorkShopId
-                                : "(not set — pick one in the Wallpapers tab)"
-                        }
-                        Label { text: "Night:"; color: Kirigami.Theme.textColor }
-                        Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideMiddle
-                            color: cfg_NightWallpaperWorkShopId
-                                ? Kirigami.Theme.textColor
-                                : Kirigami.Theme.negativeTextColor
-                            text: cfg_NightWallpaperWorkShopId
-                                ? cfg_NightWallpaperWorkShopId
-                                : "(not set — pick one in the Wallpapers tab)"
-                        }
-                    }
-                }
-            }
-            OptionItem {
-                text: 'Randomize Timer'
-                text_color: Kirigami.Theme.textColor
-                icon: '../../images/time.svg'
-                actor: Switch {
-                    id: ckbox_randomizeWallpaper
-                }
-                contentBottom: ColumnLayout {
-                    Text {
-                        Layout.fillWidth: true
-                        color: Kirigami.Theme.disabledTextColor
-                        text: "Randomize wallpapers filtered in the 'Wallpapers' page"
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: ckbox_randomizeWallpaper.checked
-                        Label {
-                            id:heightpicker
-                            text: "Randomize every "
-                            color: Kirigami.Theme.textColor
-                        }
-                        SpinBox {
-                            id: randomSpin
-                            width: font.pixelSize * 4
-                            from: 1
-                            to: 60*24*30
-                            stepSize: 1
-                        }
-                        Label { text: " min"; color: Kirigami.Theme.textColor }
-                        Item { Layout.fillWidth: true }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: ckbox_randomizeWallpaper.checked
-                        Label {
-                            id: randomWhilePausedSetter
-                            text: "Skip randomizing while wallpaper is paused  "
-                            color: Kirigami.Theme.textColor
-                        }
-                        Switch {
-                            id: ckbox_noRandomWhilePaused
-                        }
-                    }
-                }
-            }
-
             OptionItem {
                 text: "Playback Speed"
                 text_color: Kirigami.Theme.textColor
