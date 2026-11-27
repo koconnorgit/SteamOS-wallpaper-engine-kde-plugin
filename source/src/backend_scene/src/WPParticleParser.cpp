@@ -588,20 +588,8 @@ WPParticleParser::genParticleOperatorOp(const nlohmann::json&                   
                 }
             };
         } else if (name == "controlpointattract") {
+            // not implemented: the operator does nothing
             break;
-
-            ControlPointForce c = ControlPointForce::ReadFromJson(wpj);
-            return [=](const ParticleInfo& info) {
-                Vector3d offset = info.controlpoints[c.controlpoint].offset +
-                                  Vector3f { c.origin.data() }.cast<double>();
-                for (auto& p : info.particles) {
-                    Vector3d diff     = offset - PM::GetPos(p).cast<double>();
-                    double   distance = diff.norm();
-                    if (distance < c.threshold) {
-                        PM::Accelerate(p, diff.normalized() * c.scale, info.time_pass);
-                    }
-                }
-            };
         }
     } while (false);
     return [](const ParticleInfo&) {

@@ -1,14 +1,15 @@
 #pragma once
 #include <QObject>
+#include <QString>
+#include <QUrl>
 
 namespace wekde
 {
 
 class PluginInfo : public QObject {
     Q_OBJECT
-    // Q_PROPERTY(READ WRITE NOTIFY)
-    Q_PROPERTY(QUrl cache_path READ cache_path NOTIFY cache_pathChanged)
-    Q_PROPERTY(QUrl version READ version NOTIFY versionChanged)
+    Q_PROPERTY(QUrl cache_path READ cache_path CONSTANT)
+    Q_PROPERTY(QString version READ version CONSTANT)
 
 public:
     PluginInfo(QObject* parent = nullptr);
@@ -18,9 +19,5 @@ public:
 
     QString version() const { return "0.6.0"; };
 
-protected:
-signals:
-    void cache_pathChanged();
-    void versionChanged();
 };
 } // namespace wekde

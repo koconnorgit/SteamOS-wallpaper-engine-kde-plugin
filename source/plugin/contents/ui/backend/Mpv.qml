@@ -50,7 +50,6 @@ Item{
 
     onVideoRateChanged: player.setProperty('speed', videoRate);
 
-    // logfile
     // source
     // mute
     // volume

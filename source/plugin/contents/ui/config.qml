@@ -97,7 +97,7 @@ ColumnLayout {
         // FileHelper-based Pyext (no Python/WebSocket dependency)
         pyext = Qt.createQmlObject(`
             import QtQuick 2.0;
-            Pyext {}
+            Pyext { cacheProjectFiles: true }
         `, this);
     }
 

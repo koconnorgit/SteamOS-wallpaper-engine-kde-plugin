@@ -31,7 +31,6 @@ class MpvObject : public QQuickFramebufferObject {
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool mute READ mute WRITE setMute)
-    Q_PROPERTY(QString logfile READ logfile WRITE setLogfile)
     Q_PROPERTY(int volume READ volume WRITE setVolume)
 
     friend class MpvRender;
@@ -52,12 +51,10 @@ public:
     Status  status() const;
     QUrl    source() const;
     bool    mute() const;
-    QString logfile() const;
     int     volume() const;
 
     void setSource(const QUrl& source);
     void setMute(const bool& mute);
-    void setLogfile(const QString& logfile);
     void setVolume(const int& volume);
 
 public slots:
@@ -70,9 +67,10 @@ public slots:
     QVariant getProperty(const QString& name, bool* ok = nullptr) const;
     void     initCallback();
     void     checkAndEmitFirstFrame();
+    // empties mpv's event queue; nothing here acts on the events
+    void     drainEvents();
 
 signals:
-    void initFinished();
     void statusChanged();
     void sourceChanged();
     void firstFrame();
@@ -80,7 +78,6 @@ signals:
 private:
     bool   inited = false;
     QUrl   m_source;
-    Status m_status = Stopped;
 
 private:
     mpv_handle*                m_mpv { nullptr };

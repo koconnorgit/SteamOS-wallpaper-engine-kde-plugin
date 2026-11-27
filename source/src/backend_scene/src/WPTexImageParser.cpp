@@ -143,7 +143,6 @@ bool SkipMipmapV4Header(fs::IBinaryStream& file, ImageHeader& header) {
 }
 
 void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
-    header.mipmap_pow2   = algorism::IsPowOfTwo((u32)mip_0_w) || algorism::IsPowOfTwo((u32)mip_0_h);
     header.mipmap_larger = mip_0_w * mip_0_h > header.mapWidth * header.mapHeight;
 }
 
@@ -327,7 +326,6 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                 int32_t height = file.ReadInt32();
                 if (i_mipmap == 0) {
                     imageDatas[i_image] = { (float)width, (float)height };
-                    header.mipmap_pow2  = algorism::IsPowOfTwo((u32)(width * height));
                 }
                 if (header.extraHeader["texb"].val > 1) {
                     int32_t LZ4_compressed    = file.ReadInt32();

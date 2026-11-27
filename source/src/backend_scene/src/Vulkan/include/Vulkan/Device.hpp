@@ -38,7 +38,6 @@ public:
 
     TextureCache& tex_cache() const { return *m_tex_cache; }
 
-    VkDeviceSize GetUsage() const;
 
 private:
     std::vector<VkDeviceQueueCreateInfo> ChooseDeviceQueue(VkSurfaceKHR = {});

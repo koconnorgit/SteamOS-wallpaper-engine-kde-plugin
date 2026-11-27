@@ -158,13 +158,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             return;
         }
 
-        // Check if shader uses time-based uniforms (for caching optimization)
-        if (!ref.blocks.empty()) {
-            auto& block = ref.blocks.front();
-            m_uses_time_uniforms = exists(block.member_map, G_TIME) ||
-                                   exists(block.member_map, G_DAYTIME) ||
-                                   exists(block.member_map, G_POINTERPOSITION);
-        }
 
         auto& bindings = descriptor_info.bindings;
         bindings.resize(ref.binding_map.size());
@@ -332,7 +325,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             auto& vertex_bufs = m_desc.vertex_bufs;
             auto& draw_count  = m_desc.draw_count;
             auto& index_buf   = m_desc.index_buf;
-            update_dyn_buf_op = [&mesh, &vertex_bufs, &draw_count, &index_buf, dyn_buf]() {
+            bool* changed     = &rr.frame_changed;
+            update_dyn_buf_op = [&mesh, &vertex_bufs, &draw_count, &index_buf, dyn_buf, changed]() {
                 if (mesh.Dirty().exchange(false)) {
                     for (usize i = 0; i < mesh.VertexCount(); i++) {
                         const auto& vertex = mesh.GetVertexArray(i);
@@ -344,6 +338,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                     if (mesh.IndexCount() > 0) {
                         auto& indice = mesh.GetIndexArray(0);
                         u32   count  = (u32)((indice.RenderDataCount() * 2) / 3);
+                        if (draw_count != count * 3) *changed = true;
                         draw_count   = count * 3;
                         auto& buf = index_buf;
                         if (! dyn_buf->writeToBuf(buf,
@@ -370,6 +365,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                             node,
                             &sprites,
                             &vk_textures,
+                            changed = &rr.frame_changed,
                             update_dyn_buf_op]() {
             auto update_unf_op = [&block, buf, bufref](std::string_view       name,
                                                        wallpaper::ShaderValue value) {
@@ -380,7 +376,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             {
                 for (auto& [i, sp] : sprites) {
                     if (i >= vk_textures.size()) continue;
-                    vk_textures.at(i).active = sp.GetCurFrame().imageId;
+                    const auto frame = sp.GetCurFrame().imageId;
+                    if (vk_textures.at(i).active != frame) *changed = true;
+                    vk_textures.at(i).active = frame;
                 }
             }
             if (update_dyn_buf_op) update_dyn_buf_op();
@@ -423,7 +421,6 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
 void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     // NOTE: Pass caching disabled - output textures are not preserved between frames
     // in current render graph implementation. Would need persistent render targets.
-    // if (isCacheable() && m_cached) { return; }
 
     if (m_desc.update_op) m_desc.update_op();
 

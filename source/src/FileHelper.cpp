@@ -6,7 +6,10 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCoreApplication>
+#include <QPointer>
 #include <QSaveFile>
+#include <QThreadPool>
 #include <QStandardPaths>
 #include <QDateTime>
 
@@ -52,6 +55,42 @@ QByteArray FileHelper::readFile(const QString& path) {
 }
 
 bool FileHelper::exists(const QString& path) { return QFileInfo::exists(path); }
+
+// Runs the job on the global thread pool and reports back on this object's
+// thread. The job must not touch `this`: the helper may be gone by the time
+// it runs (Plasma creates the settings page twice and drops the first).
+int FileHelper::runAsync(std::function<QVariant()> job) {
+    const int            id = ++m_nextId;
+    QPointer<FileHelper> self(this);
+    QThreadPool::globalInstance()->start([self, id, job = std::move(job)]() {
+        QVariant result = job();
+        QMetaObject::invokeMethod(
+            qApp,
+            [self, id, result]() {
+                if (self) Q_EMIT self->asyncFinished(id, result);
+            },
+            Qt::QueuedConnection);
+    });
+    return id;
+}
+
+int FileHelper::readFileAsync(const QString& path) {
+    return runAsync([path]() {
+        return QVariant(QString::fromUtf8(FileHelper().readFile(path)));
+    });
+}
+
+int FileHelper::getDirSizeAsync(const QString& path, int depth) {
+    return runAsync([path, depth]() {
+        return QVariant(FileHelper().getDirSize(path, depth));
+    });
+}
+
+int FileHelper::getFolderListAsync(const QString& path, const QVariantMap& opt) {
+    return runAsync([path, opt]() {
+        return QVariant(FileHelper().getFolderList(path, opt));
+    });
+}
 
 qint64 FileHelper::getDirSize(const QString& path, int depth) {
     qint64 totalSize = 0;

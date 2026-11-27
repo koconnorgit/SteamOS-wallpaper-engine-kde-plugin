@@ -38,7 +38,6 @@ public:
     ~Looper();
 
     handler_id             registerHandler(const std::shared_ptr<Handler>&);
-    void                   unregisterHandler(handler_id id);
     status_t               start();
     void                   stop();
     void                   post(const std::shared_ptr<Message>&);
@@ -120,8 +119,6 @@ public:
         void        setName(std::string_view name);
     };
 
-    int32_t     countEntries() const;
-    const Item* getEntryAt(int32_t index) const;
 
     bool setBool(std::string_view, bool);
     bool setInt32(std::string_view, int32_t);

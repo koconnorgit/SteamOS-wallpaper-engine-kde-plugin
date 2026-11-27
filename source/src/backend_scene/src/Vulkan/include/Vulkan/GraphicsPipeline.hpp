@@ -36,14 +36,11 @@ public:
     VkPipelineRasterizationStateCreateInfo raster {};
     VkPipelineDepthStencilStateCreateInfo  depth {};
 
-    ShaderSpv*  getShaderSpv(VkShaderStageFlagBits) const;
     const auto& pass() const { return m_pass; }
 
     GraphicsPipeline& setColorBlendStates(std::span<const VkPipelineColorBlendAttachmentState>);
-    GraphicsPipeline& setLogicOp(bool enable, VkLogicOp);
 
     // required after default
-    GraphicsPipeline& setRenderPass(vvk::RenderPass);
     GraphicsPipeline& addDescriptorSetInfo(std::span<const DescriptorSetInfo>);
     GraphicsPipeline& addStage(Uni_ShaderSpv&&);
     GraphicsPipeline& addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);

@@ -17,6 +17,11 @@ struct RenderingResources {
 
     StagingBuffer* vertex_buf;
     StagingBuffer* dyn_buf;
+
+    // Set by a pass when this frame differs from the last one in a way that
+    // doesn't show as bytes written to dyn_buf: another sprite frame bound, a
+    // different number of vertices drawn. See drawFrameOffscreen.
+    bool frame_changed { true };
 };
 } // namespace vulkan
 } // namespace wallpaper

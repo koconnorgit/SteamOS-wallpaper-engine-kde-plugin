@@ -96,27 +96,11 @@ void GraphicsPipeline::toDefault() {
     };
 }
 
-ShaderSpv* GraphicsPipeline::getShaderSpv(VkShaderStageFlagBits stage) const {
-    if (exists(m_stage_spv_map, stage)) return m_stage_spv_map.at(stage).get();
-    return nullptr;
-}
-
 GraphicsPipeline&
 GraphicsPipeline::setColorBlendStates(std::span<const VkPipelineColorBlendAttachmentState> stats) {
     m_color_attachments     = { stats.begin(), stats.end() };
     m_color.attachmentCount = (u32)m_color_attachments.size();
     m_color.pAttachments    = m_color_attachments.data();
-    return *this;
-}
-
-GraphicsPipeline& GraphicsPipeline::setLogicOp(bool enable, VkLogicOp op) {
-    m_color.logicOp       = op;
-    m_color.logicOpEnable = enable;
-    return *this;
-}
-
-GraphicsPipeline& GraphicsPipeline::setRenderPass(vvk::RenderPass pass) {
-    m_pass = std::move(pass);
     return *this;
 }
 

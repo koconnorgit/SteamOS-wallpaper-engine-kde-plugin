@@ -38,7 +38,6 @@ struct ImageHeader {
     i32 mapHeight { 0 };
 
     bool mipmap_larger { false };
-    bool mipmap_pow2 { false };
 
     ImageType     type { ImageType::UNKNOWN };
     TextureFormat format { TextureFormat::RGBA8 };

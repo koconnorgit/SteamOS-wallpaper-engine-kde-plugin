@@ -124,17 +124,18 @@ void MpvObject::initCallback() {
     m_source.clear();
     inited = true;
     setSource(temp);
-    Q_EMIT initFinished();
 }
 
+// Setting "pause" to what it already is does nothing, so there is no need to
+// ask mpv for its state first (two blocking property reads each time).
 void MpvObject::play() {
-    if (status() != Paused) return;
     this->setProperty("pause", false);
+    Q_EMIT statusChanged();
 }
 
 void MpvObject::pause() {
-    if (status() != Playing) return;
     this->setProperty("pause", true);
+    Q_EMIT statusChanged();
 }
 
 void MpvObject::stop() {
@@ -143,6 +144,7 @@ void MpvObject::stop() {
     if (result) {
         m_source.clear();
         Q_EMIT sourceChanged();
+        Q_EMIT statusChanged();
     }
 }
 
@@ -159,8 +161,6 @@ bool MpvObject::mute() const {
     return aid == "no";
 }
 
-QString MpvObject::logfile() const { return getProperty("log-file").toString(); }
-
 int MpvObject::volume() const { return getProperty("volume").toInt(); }
 
 void MpvObject::setMute(const bool& mute) {
@@ -169,8 +169,6 @@ void MpvObject::setMute(const bool& mute) {
 }
 
 void MpvObject::setVolume(const int& volume) { setProperty("volume", volume); }
-
-void MpvObject::setLogfile(const QString& logfile) { setProperty("log-file", logfile); }
 
 void MpvObject::setSource(const QUrl& source) {
     if (source.isEmpty()) {
@@ -312,12 +310,32 @@ MpvObject::MpvObject(QQuickItem* parent)
     mpv_set_option_string(m_mpv, "config", "no");
     if (mpv_initialize(m_mpv) < 0) qWarning() << "wekde.mpv: could not initialize mpv context";
 
+    // With a looping video the event queue fills up if nobody reads it, and
+    // mpv then drops events and says so in its log. Read it whenever mpv says
+    // there is something, on this object's thread.
+    mpv_set_wakeup_callback(
+        m_mpv,
+        [](void* ctx) {
+            QMetaObject::invokeMethod(
+                static_cast<MpvObject*>(ctx), "drainEvents", Qt::QueuedConnection);
+        },
+        this);
+
     mpv_set_option_string(m_mpv, "hwdec", "auto");
     mpv_set_option_string(m_mpv, "vo", "libmpv");
     mpv_set_option_string(m_mpv, "loop", "inf");
 }
 
-MpvObject::~MpvObject() {}
+MpvObject::~MpvObject() {
+    // the handle can outlive this item (the renderer shares it)
+    if (m_mpv) mpv_set_wakeup_callback(m_mpv, nullptr, nullptr);
+}
+
+void MpvObject::drainEvents() {
+    if (! m_mpv) return;
+    while (mpv_wait_event(m_mpv, 0)->event_id != MPV_EVENT_NONE) {
+    }
+}
 
 void MpvObject::checkAndEmitFirstFrame() {
     if (! m_first_frame) {

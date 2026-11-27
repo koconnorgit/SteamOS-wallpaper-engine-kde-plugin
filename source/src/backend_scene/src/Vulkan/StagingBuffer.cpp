@@ -227,6 +227,10 @@ bool StagingBuffer::writeToBuf(const StagingBufferRef& ref, std::span<uint8_t> d
     }
     VkDeviceSize size = std::min(ref.size - offset, data.size());
     uint8_t*     raw  = (uint8_t*)m_stage_raw;
+    // Most uniforms are written every frame with the value they already have.
+    // Leaving those alone keeps them out of the upload, and lets a frame in
+    // which nothing changed be recognised as such.
+    if (size == 0 || std::memcmp(raw + ref.offset + offset, data.data(), size) == 0) return true;
     std::copy(data.begin(), data.begin() + size, raw + ref.offset + offset);
     markDirty(ref.offset + offset, ref.offset + offset + size);
     return true;

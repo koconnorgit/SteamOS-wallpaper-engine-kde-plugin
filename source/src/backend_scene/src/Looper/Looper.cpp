@@ -98,17 +98,6 @@ handler_id Looper::registerHandler(const std::shared_ptr<Handler>& handler) {
     return Handler::INVALID_HANDLER_ID;
 }
 
-void Looper::unregisterHandler(handler_id id) {
-    Lock lock(m_mutex);
-    if (m_reg_handler.count(id) > 0) {
-        auto handle = m_reg_handler[id].lock();
-        if (handle != nullptr) {
-            handle->setID(id, {});
-        }
-        m_reg_handler.erase(id);
-    }
-}
-
 Handler::Handler(): m_id(INVALID_HANDLER_ID) {}
 
 int32_t               Handler::id() const { return m_id; }
@@ -171,13 +160,6 @@ void Message::deliver() {
 }
 
 void Message::Item::setName(std::string_view name) { this->name.assign(name); }
-
-int32_t Message::countEntries() const { return m_num_items; }
-
-const Message::Item* Message::getEntryAt(int32_t index) const {
-    if (index < 0 || index >= m_num_items || index >= MaxNumItems) return nullptr;
-    return &m_items[(size_t)index];
-}
 
 template<typename T>
 const Message::Item* Message::findItem(std::string_view name) const {

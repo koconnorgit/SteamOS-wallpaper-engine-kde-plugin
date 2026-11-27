@@ -43,6 +43,8 @@ public:
     // Makes sure gpuBuf() is valid. Call before recording commands that bind
     // it, when recordUpload comes after them.
     bool ensureGpuBuf();
+    // something was written since the last upload that differs from what was there
+    bool hasDirty() const { return m_upload_all || ! m_dirty.empty(); }
     bool recordUpload(vvk::CommandBuffer&);
 
     VkBuffer gpuBuf() const;

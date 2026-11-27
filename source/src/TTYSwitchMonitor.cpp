@@ -3,8 +3,8 @@
 
 using namespace wekde;
 
-TTYSwitchMonitor::TTYSwitchMonitor(QQuickItem *parent)
-    : QQuickItem(parent), m_sleeping(false) {
+TTYSwitchMonitor::TTYSwitchMonitor(QObject *parent)
+    : QObject(parent), m_sleeping(false) {
     QDBusConnection systemBus = QDBusConnection::systemBus();
     if (!systemBus.isConnected()) {
         // not worth taking the shell down for, the wallpaper just won't know about sleep

@@ -1,5 +1,5 @@
 #pragma once
-#include <QQuickItem>
+#include <QObject>
 #include <QVariantList>
 
 class KDarkLightScheduleProvider;
@@ -12,7 +12,7 @@ namespace wekde {
 // KNightTime reports each transition as a window: morning runs from dawn to
 // sunrise, evening from sunset to dusk. Sunrise is therefore the end of the
 // morning window and sunset the start of the evening one.
-class SunSchedule : public QQuickItem {
+class SunSchedule : public QObject {
     Q_OBJECT
     // False when the plugin was built without KNightTime (Plasma < 6.5).
     Q_PROPERTY(bool available READ isAvailable CONSTANT)
@@ -24,7 +24,7 @@ class SunSchedule : public QQuickItem {
     Q_PROPERTY(QVariantList sunsets READ sunsets NOTIFY scheduleChanged)
 
 public:
-    SunSchedule(QQuickItem* parent = nullptr);
+    SunSchedule(QObject* parent = nullptr);
 
     bool         isAvailable() const;
     bool         isReady() const { return m_ready; }

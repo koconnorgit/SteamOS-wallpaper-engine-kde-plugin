@@ -33,6 +33,25 @@ WORKSHOP = STEAM / "steamapps/workshop/content/431960"
 A, B, C, D, E = "3593248271", "2276185076", "1601099860", "1590580682", "2321186234"
 
 
+def config_defaults():
+    """The config keys and their defaults, from the plugin's main.xml."""
+    import xml.etree.ElementTree as ET
+    ns = "{http://www.kde.org/standards/kcfg/1.0}"
+    values = {}
+    for e in ET.parse(SOURCE / "plugin/contents/config/main.xml").getroot().iter(ns + "entry"):
+        d = e.find(ns + "default")
+        v = d.text if d is not None and d.text else ""
+        kind = e.get("type")
+        if kind == "Bool":
+            v = v == "true"
+        elif kind in ("Int", "UInt"):
+            v = int(v or 0)
+        elif kind == "Double":
+            v = float(v or 0)
+        values[e.get("name")] = v
+    return values
+
+
 def src(wid):
     return f"file://{WORKSHOP}/{wid}/scene.json+scene"
 
@@ -119,7 +138,24 @@ def scenario_mixed(tmp):
     }
 
 
-SCENARIOS = {"crossfade": scenario_crossfade, "schedule": scenario_schedule, "mixed": scenario_mixed}
+def scenario_static(tmp):
+    still = "1766198823"   # nothing in it moves, so the renderer stops drawing after its first frames
+    return {
+        "notes": [
+            "to a scene that draws three frames and then stops, and away from it again",
+            "it has to fade in like any other, stay up, and fade out",
+        ],
+        "config": {**pick(A)},
+        "steps": [
+            {"at": 3000, "note": "to the still scene", "set": pick(still)},
+            {"at": 9000, "note": "to B", "set": pick(B)},
+            {"at": 13000, "quit": True},
+        ],
+    }
+
+
+SCENARIOS = {"crossfade": scenario_crossfade, "schedule": scenario_schedule, "mixed": scenario_mixed,
+             "static": scenario_static}
 
 KEEP = re.compile(r"TEST |loading scene|wekde.mpv|Destroy sceneobject|schedule:|never drew|can't load scene|parse scene|"
                   r"TypeError|ReferenceError|Error:|Unable to assign|Cannot |is not a function|is not defined|"
@@ -141,7 +177,7 @@ def run(name):
         os.symlink(lib, mod / lib.name)
         shutil.copy(SOURCE / "src/qmldir", mod / "qmldir")
         sc = SCENARIOS[name](tmp)
-        config = json.loads((HERE / "defaults.json").read_text())
+        config = config_defaults()
         config.update({"SteamLibraryPath": f"file://{STEAM}", "MouseInput": False, "PauseMode": 0})
         config.update(sc["config"])
         spec = {"main": str(SOURCE / "plugin/contents/ui/main.qml"), "config": config, "steps": sc["steps"],
@@ -167,8 +203,44 @@ def run(name):
         print(f"   exit {p.returncode}")
 
 
+def run_dialog():
+    """Opens the settings page for a few seconds and prints what its wallpaper list loaded."""
+    lib = SOURCE / "build/src/libWallpaperEngineKde.so"
+    qml = shutil.which("qml6") or shutil.which("qml")
+    with tempfile.TemporaryDirectory(prefix="wek-qmltest-") as t:
+        tmp = Path(t)
+        mod = tmp / "imports/com/github/catsout/wallpaperEngineKde"
+        mod.mkdir(parents=True)
+        os.symlink(lib, mod / lib.name)
+        shutil.copy(SOURCE / "src/qmldir", mod / "qmldir")
+        values = config_defaults()
+        values.update({"SteamLibraryPath": f"file://{STEAM}", **pick(A)})
+        # the page takes each config key as a cfg_ property
+        skip = {"ScheduleHoldUntil", "ScheduleAppliedKey", "DayNightSwitch", "DayWallpaperWorkShopId",
+                "DayWallpaperSource", "NightWallpaperWorkShopId", "NightWallpaperSource", "BackgroundColor"}
+        cfg = {f"cfg_{k}": v for k, v in values.items() if k not in skip}
+        spec = {"config": str(SOURCE / "plugin/contents/ui/config.qml"), "values": values, "cfg": cfg, "seconds": 8}
+        env = dict(os.environ, QT_FORCE_STDERR_LOGGING="1", XDG_CONFIG_HOME=str(tmp / "config"),
+                   XDG_CACHE_HOME=str(tmp / "cache"))
+        (tmp / "config").mkdir()
+        print("== dialog")
+        print("   expect  the wallpaper list fills in (a count well above 0) and no QML errors")
+        p = subprocess.Popen([qml, "-I", str(tmp / "imports"), str(HERE / "dialog.qml"), "--", json.dumps(spec)],
+                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        for line in p.stderr:
+            if re.search(r"TEST |Error|rror:|is not|Unable|Cannot|undefined|Binding loop", line):
+                print("   " + line.rstrip()[:220])
+        p.wait(timeout=30)
+        print(f"   exit {p.returncode}")
+
+
 def main():
     args = sys.argv[1:]
+    if "dialog" in args:
+        run_dialog()
+        args = [a for a in args if a != "dialog"]
+        if not args:
+            return
     if "--list" in args:
         print("\n".join(SCENARIOS))
         return

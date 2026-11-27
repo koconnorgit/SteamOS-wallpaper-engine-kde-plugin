@@ -129,11 +129,6 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
         const auto clineEnd = lineEnd;
         const auto line     = src.substr(pos, lineEnd - pos);
 
-        /*
-        if(line.find("attribute ") != std::string::npos || line.find("in ") != std::string::npos) {
-            update_pos = true;
-        }
-        */
         if (line.find("// [COMBO]") != std::string::npos) {
             nlohmann::json combo_json;
             auto brace = line.find_first_of('{');

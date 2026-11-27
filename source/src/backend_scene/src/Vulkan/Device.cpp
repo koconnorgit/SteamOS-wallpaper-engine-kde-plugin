@@ -159,12 +159,6 @@ bool Device::Create(Instance& inst, std::span<const Extension> exts, VkExtent2D 
     return true;
 }
 
-VkDeviceSize Device::GetUsage() const {
-    VmaBudget budget;
-    vmaGetHeapBudgets(*m_allocator, &budget);
-    return budget.usage;
-}
-
 void Device::Destroy() { VVK_CHECK(m_device.WaitIdle()); }
 
 Device::Device(): m_tex_cache(std::make_unique<TextureCache>(*this)) {}

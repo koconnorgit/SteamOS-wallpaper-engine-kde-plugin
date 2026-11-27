@@ -13,34 +13,13 @@ MouseGrabber::MouseGrabber(QQuickItem* parent): QQuickItem(parent) {
     setAcceptHoverEvents(true);
 }
 
-bool MouseGrabber::forceCapture() const { return m_forceCapture; }
-
 QQuickItem* MouseGrabber::target() const { return m_target; }
-
-void MouseGrabber::setForceCapture(bool value) {
-    if (value == m_forceCapture) return;
-    m_forceCapture = value;
-    if (value) {
-        grabMouse();
-    } else {
-        ungrabMouse();
-    }
-    Q_EMIT forceCaptureChanged();
-}
 
 void MouseGrabber::setTarget(QQuickItem* item) {
     if (item == m_target) return;
     m_target = item;
     if (m_target) m_target->setAcceptedMouseButtons(Qt::LeftButton);
     Q_EMIT targetChanged();
-}
-
-void MouseGrabber::mouseUngrabEvent() {
-    if (m_forceCapture) grabMouse();
-}
-
-void MouseGrabber::sendEvent(QObject* target, QEvent* event) {
-    QCoreApplication::sendEvent(target, event);
 }
 
 void MouseGrabber::sendMouseEvent(QMouseEvent* event) {

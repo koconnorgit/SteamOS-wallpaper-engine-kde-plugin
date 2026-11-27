@@ -97,10 +97,6 @@ void SoundManager::MountStream(std::unique_ptr<SoundStream>&& ss) {
     pImpl->device.MountChannel(std::make_unique<Channel_Impl>(std::move(ss)));
 }
 
-void SoundManager::Test(std::shared_ptr<fs::IBinaryStream> stream) {
-    BStreamWrapper sw { stream };
-    auto           decoder = std::make_unique<miniaudio::Decoder<BStreamWrapper>>(std::move(sw));
-}
 bool SoundManager::Init() {
     if (Muted()) {
         LOG_INFO("muted, not init sound device");

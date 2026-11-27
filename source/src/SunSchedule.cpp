@@ -13,7 +13,7 @@ namespace
 constexpr int kReadyTimeoutMs = 5000;
 } // namespace
 
-SunSchedule::SunSchedule(QQuickItem* parent): QQuickItem(parent) {
+SunSchedule::SunSchedule(QObject* parent): QObject(parent) {
 #ifdef WEKDE_HAVE_KNIGHTTIME
     m_provider = new KDarkLightScheduleProvider(QString(), this);
     connect(m_provider, &KDarkLightScheduleProvider::scheduleChanged, this, [this] {

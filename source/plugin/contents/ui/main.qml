@@ -130,9 +130,19 @@ Rectangle {
     function scheduleSunTimes() {
         return { sunrises: sunSchedule.sunrises, sunsets: sunSchedule.sunsets };
     }
+    // Whether a wallpaper's folder is still there (it may have been
+    // unsubscribed). Asked for every playlist item at every evaluation, so the
+    // answers are kept for a few minutes.
+    property var scheduleAvailability: ({})
     function scheduleItemAvailable(item) {
         const dir = Common.wallpaperDirOfSource(item.source);
-        return Boolean(dir) && pyext.exists(dir);
+        if (!dir) return false;
+        const now = Date.now();
+        const known = scheduleAvailability[dir];
+        if (known && now - known.at < 5 * 60 * 1000) return known.ok;
+        const ok = pyext.exists(dir);
+        scheduleAvailability[dir] = { ok: ok, at: now };
+        return ok;
     }
     function scheduleHoldUntil() {
         return Number(wallpaper.configuration.ScheduleHoldUntil) || 0;
@@ -154,6 +164,8 @@ Rectangle {
         if (Sched.usesSun(conf) && !sunSchedule.ready) return;
 
         const now = Date.now();
+        // an edit may be about wallpapers that have just come or gone
+        if (background.scheduleRedecide) background.scheduleAvailability = ({});
         const res = Sched.resolve(conf, now, scheduleSunTimes(), scheduleItemAvailable);
         // the decision itself is in schedule.mjs, where it is tested
         const d = Sched.decide(res, now, {

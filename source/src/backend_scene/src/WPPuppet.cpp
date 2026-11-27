@@ -19,13 +19,6 @@ void WPPuppet::prepared() {
             (b.noParent() ? Affine3f::Identity() : combined_tran[b.parent]) * b.transform;
 
         b.offset_trans = combined_tran[i].inverse();
-        /*
-        b.world_axis_x = (b.offset_trans.linear() *
-        Vector3f::UnitX()).normalized(); b.world_axis_y =
-        (b.offset_trans.linear() * Vector3f::UnitY()).normalized();
-        b.world_axis_z = (b.offset_trans.linear() *
-        Vector3f::UnitZ()).normalized();
-        */
     }
     for (auto& anim : anims) {
         anim.frame_time = 1.0f / anim.fps;

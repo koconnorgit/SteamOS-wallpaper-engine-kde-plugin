@@ -66,7 +66,7 @@ struct VulkanRender::Impl {
 
     bool initRes();
     void drawFrameSwapchain();
-    void drawFrameOffscreen();
+    bool drawFrameOffscreen();
     std::array<VkCommandBuffer, 2> recordDynUpload();
     void setRenderTargetSize(Scene&, rg::RenderGraph&);
 
@@ -88,6 +88,8 @@ struct VulkanRender::Impl {
     bool m_with_surface { false };
     bool m_inited { false };
     bool m_pass_loaded { false };
+    // frames still to draw whether or not anything changed
+    int m_redraw_frames { 0 };
 
     std::unique_ptr<VulkanExSwapchain> m_ex_swapchain;
     RenderingResources                 m_rendering_resources;
@@ -283,7 +285,6 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
 void VulkanRender::Impl::drawFrame(Scene& scene) {
     if (! (m_inited && m_pass_loaded)) return;
 
-        // LOG_INFO("used ram: %fm", (m_device->GetUsage()/1024.0f)/1024.0f);
 
 #if ENABLE_RENDERDOC_API
     if (rdoc_api)
@@ -291,13 +292,15 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
             RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE((VkInstance)m_instance.inst()), NULL);
 #endif
 
+    bool drawn = true;
     if (m_instance.offscreen()) {
-        drawFrameOffscreen();
+        drawn = drawFrameOffscreen();
     } else {
         drawFrameSwapchain();
     }
 
-    if (m_redraw_cb) m_redraw_cb();
+    // nobody needs to look at a frame that wasn't drawn
+    if (drawn && m_redraw_cb) m_redraw_cb();
 
 #if ENABLE_RENDERDOC_API
     if (rdoc_api)
@@ -379,7 +382,10 @@ std::array<VkCommandBuffer, 2> VulkanRender::Impl::recordDynUpload() {
     return { *m_upload_cmd.address(), *m_rendering_resources.command.address() };
 }
 
-void VulkanRender::Impl::drawFrameOffscreen() {
+// Returns false when the frame would have been identical to the last one and
+// was not drawn. A scene with nothing moving in it, or one whose only motion
+// is the pointer, costs the gpu nothing while it is like that.
+bool VulkanRender::Impl::drawFrameOffscreen() {
     RenderingResources& rr    = m_rendering_resources;
     ImageParameters     image = m_ex_swapchain->GetInprogressImage();
 
@@ -400,6 +406,15 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     }
 
     (void)rr.command.End();
+
+    // Recording the passes is what tells whether anything changed: they have
+    // now written this frame's uniforms and vertices, and writes that match
+    // what was there don't count.
+    const bool changed = m_redraw_frames > 0 || rr.frame_changed || m_dyn_buf->hasDirty();
+    rr.frame_changed   = false;
+    if (! changed) return false;
+    if (m_redraw_frames > 0) m_redraw_frames--;
+
     const auto frame_cmds = recordDynUpload();
 
     VkSubmitInfo sub_info {
@@ -408,11 +423,13 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         .commandBufferCount = (uint32_t)frame_cmds.size(),
         .pCommandBuffers    = frame_cmds.data(),
     };
-    VVK_CHECK_VOID_RE(m_device->graphics_queue().handle.Submit(sub_info, *rr.fence_frame));
+    VVK_CHECK_ACT(return false,
+                  m_device->graphics_queue().handle.Submit(sub_info, *rr.fence_frame));
 
-    VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
-    VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
+    VVK_CHECK_ACT(return false, rr.fence_frame.Wait(vk_wait_time));
+    VVK_CHECK_ACT(return false, rr.fence_frame.Reset());
     m_ex_swapchain->renderFrame();
+    return true;
 }
 
 void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) {
@@ -451,6 +468,7 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
 
 void VulkanRender::Impl::UpdateCameraFillMode(wallpaper::Scene&   scene,
                                               wallpaper::FillMode fillmode) {
+    m_redraw_frames = 3;
     using namespace wallpaper;
     auto width  = m_device->out_extent().width;
     auto height = m_device->out_extent().height;
@@ -579,4 +597,6 @@ void VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
         VVK_CHECK_VOID_RE(upload_fence.Wait(vk_wait_time));
     }
     m_pass_loaded = true;
+    // a new scene: draw it into each of the three exported images
+    m_redraw_frames = 3;
 };

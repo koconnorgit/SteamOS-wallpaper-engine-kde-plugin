@@ -1,6 +1,8 @@
 #include <QQmlExtensionPlugin>
 #include <QQmlEngine>
 #include <array>
+#include <clocale>
+#include <cstring>
 #include "MpvBackend.hpp"
 #include "SceneBackend.hpp"
 #include "MouseGrabber.hpp"
