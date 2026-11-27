@@ -37,6 +37,15 @@ target_link_libraries(${PROJECT_NAME}
         wescene-renderer
 )
 
+# headless benchmark, see docs/benchmark.md
+add_executable(scenebench
+    scenebench.cpp
+)
+target_link_libraries(scenebench
+    PUBLIC
+        wescene-renderer
+)
+
 if(BUILD_QML)
     find_package(Qt${QT_MAJOR_VERSION} COMPONENTS Qml REQUIRED)
 
