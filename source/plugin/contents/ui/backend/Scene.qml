@@ -7,11 +7,13 @@ Item{
     anchors.fill: parent
     property alias source: player.source
     property string assets: "assets"
-    property int displayMode: background.displayMode
-    property string userPropsJson: background.userPropsJson
+    // this wallpaper's own options (see optionsComponent in main.qml)
+    property var opts
+    property int displayMode: sceneItem.opts.displayMode
+    property string userPropsJson: sceneItem.opts.userPropsJson
     property var volumeFade: Common.createVolumeFade(
         sceneItem, 
-        Qt.binding(function() { return background.mute ? 0 : background.volume; }),
+        Qt.binding(function() { return sceneItem.opts.mute ? 0 : sceneItem.opts.volume; }),
         (volume) => { player.volume = volume / 100.0; }
     )
 
@@ -32,7 +34,7 @@ Item{
         onTriggered: sceneItem.displayModeChanged()
     }
     Connections {
-        target: background
+        target: sceneItem.opts
         function onDisplayModeChanged() {
             displayModeFixTimer.restart();
         }
@@ -41,9 +43,9 @@ Item{
     SceneViewer {
         id: player
         anchors.fill: parent
-        fps: background.fps
-        muted: background.mute
-        speed: background.speed
+        fps: sceneItem.opts.fps
+        muted: sceneItem.opts.mute
+        speed: sceneItem.opts.speed
         assets: sceneItem.assets
         userProperties: sceneItem.userPropsJson
         Component.onCompleted: {
@@ -54,7 +56,7 @@ Item{
         Connections {
             target: player
             function onFirstFrame() {
-                background.sig_backendFirstFrame('scene');
+                background.sig_backendFirstFrame('scene', sceneItem);
             }
         }
     }

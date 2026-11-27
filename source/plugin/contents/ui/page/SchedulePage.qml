@@ -190,6 +190,13 @@ Flickable {
                                 ? "time unknown"
                                 : `≈ ${schedulePage.formatMinutes(modelData.minutes)} today`
                         }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: modelData.clash
+                            color: Kirigami.Theme.neutralTextColor
+                            wrapMode: Text.WordWrap
+                            text: "Same time as another slot. Only one takes effect."
+                        }
                     }
 
                     Image {
@@ -479,7 +486,8 @@ Flickable {
                 at = list.findIndex(e => e.target.type === 'playlist' && e.target.id === slot.target.id);
             else if (!wallpaper && slot && slot.target.type === 'none')
                 at = list.length - 1;
-            targetBox.currentIndex = Math.max(0, at);
+            // the slot's playlist was deleted: "Nothing yet", not whatever is first
+            targetBox.currentIndex = at < 0 ? list.length - 1 : at;
 
             const how = Sched.rotation(schedulePage.conf, slot ? slot.target : null);
             orderBox.currentIndex = how.order === 'shuffle' ? 1 : 0;

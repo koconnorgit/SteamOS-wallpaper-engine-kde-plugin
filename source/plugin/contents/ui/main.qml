@@ -15,8 +15,6 @@ Rectangle {
     property string steamlibrary: Qt.resolvedUrl(wallpaper.configuration.SteamLibraryPath).toString()
     property string source: Qt.resolvedUrl(wallpaper.configuration.WallpaperSource).toString()
 
-    property string filterStr: wallpaper.configuration.FilterStr
-
     property int    videoBackend: wallpaper.configuration.VideoBackend
     property int    fps: wallpaper.configuration.Fps
 
@@ -27,76 +25,54 @@ Rectangle {
     property int    pauseBatPercent: wallpaper.configuration.PauseBatPercent
 
     
-    property var curOpt: ({})
-    property string workshopid: {
-        const wid = wallpaper.configuration.WallpaperWorkShopId;
-        pyext.read_wallpaper_config(wid).then((res) => this.curOpt = res);
-        return wid;
-    }
-    function get_opt_value(key, def) {
-        if(curOpt.hasOwnProperty(key))
-            return curOpt[key];
-        return def;
-    }
+    readonly property string workshopid: wallpaper.configuration.WallpaperWorkShopId
 
-    // Update all derived properties when curOpt changes
-    onCurOptChanged: {
-        console.log("main.qml onCurOptChanged, curOpt:", JSON.stringify(curOpt));
-        displayMode = get_opt_value('display_mode', wallpaper.configuration.DisplayMode);
-        mute = get_opt_value('mute_audio', wallpaper.configuration.MuteAudio);
-        volume = get_opt_value('volume', wallpaper.configuration.Volume);
-        speed = get_opt_value('speed', wallpaper.configuration.Speed);
-        const userProps = curOpt['user_props'];
-        userPropsJson = userProps ? JSON.stringify(userProps) : "";
-        console.log("main.qml updated: displayMode=", displayMode, "speed=", speed, "userPropsJson=", userPropsJson);
-    }
+    // The options one wallpaper plays with: the ones saved for it, over the
+    // global ones. Every backend gets a set of its own when it is created and
+    // keeps it, so during a crossfade the outgoing wallpaper goes on playing
+    // with its own volume, display mode and so on while the incoming one
+    // already uses its own.
+    Component {
+        id: optionsComponent
+        QtObject {
+            property string wid
+            property var saved: ({})
+            function saved_or(key, def) {
+                return saved.hasOwnProperty(key) ? saved[key] : def;
+            }
+            // plain bindings: they follow the saved options and the config alike
+            readonly property int    displayMode: saved_or('display_mode', wallpaper.configuration.DisplayMode)
+            readonly property bool   mute: saved_or('mute_audio', wallpaper.configuration.MuteAudio)
+            readonly property int    volume: saved_or('volume', wallpaper.configuration.Volume)
+            readonly property real   speed: saved_or('speed', wallpaper.configuration.Speed)
+            // user properties for scene wallpapers, as a json string
+            readonly property string userPropsJson: saved['user_props'] ? JSON.stringify(saved['user_props']) : ""
+            readonly property int    fps: background.fps
+            readonly property bool   mpvStats: background.mpvStats
 
-    property int    displayMode: get_opt_value('display_mode', wallpaper.configuration.DisplayMode)
-    property bool   mute: get_opt_value('mute_audio', wallpaper.configuration.MuteAudio)
-    property int    volume: get_opt_value('volume', wallpaper.configuration.Volume)
-    property real   speed: get_opt_value('speed', wallpaper.configuration.Speed)
-    // User properties for scene wallpapers (JSON string format)
-    property string userPropsJson: ""
-
-    // Reactive bindings for configuration changes
-    Connections {
-        target: wallpaper.configuration
-        function onDisplayModeChanged() {
-            background.displayMode = background.get_opt_value('display_mode', wallpaper.configuration.DisplayMode);
+            function reload() {
+                pyext.read_wallpaper_config(wid).then((res) => { saved = res; });
+            }
+            // bumped by the settings dialog when saved options were edited
+            readonly property int edits: wallpaper.configuration.PerOptChanged
+            onEditsChanged: reload()
+            Component.onCompleted: reload()
         }
-        function onMuteAudioChanged() {
-            background.mute = background.get_opt_value('mute_audio', wallpaper.configuration.MuteAudio);
-        }
-        function onVolumeChanged() {
-            background.volume = background.get_opt_value('volume', wallpaper.configuration.Volume);
-        }
-        function onSpeedChanged() {
-            background.speed = background.get_opt_value('speed', wallpaper.configuration.Speed);
-        }
-    }
-
-    property int    perOptChanged: wallpaper.configuration.PerOptChanged
-    onPerOptChangedChanged: {
-        console.log("main.qml onPerOptChangedChanged, perOptChanged:", perOptChanged, "workshopid:", workshopid);
-        pyext.read_wallpaper_config(workshopid).then((res) => {
-            console.log("main.qml read_wallpaper_config result:", JSON.stringify(res));
-            this.curOpt = res;
-        });
     }
 
     // auto pause
     property bool   ok: !windowModel.reqPause && !powerSource.reqPause
 
     // detect TTY switch and pause wallpaper(s)
+    // pause for suspend, and catch up with the schedule on wake
     TTYSwitchMonitor {
         id: ttyMonitor
-        onTtySwitch: {
+        onTtySwitch: (sleep) => {
             if (sleep) {
-                console.log("Preparing for sleep (possibly a VT switch)");
-                this.pause();
+                backendLoader.pauseAll();
             } else {
-                console.log("Waking up (VT switch back)");
-                this.play();
+                background.autoPause();
+                background.evaluateSchedule();
             }
         }
     }
@@ -115,7 +91,7 @@ Rectangle {
         // Playlists edited, possibly from another monitor's settings: choose
         // again. A wallpaper picked by hand stays put.
         onTextChanged: Qt.callLater(() => {
-            background.setScheduleKey("");
+            background.scheduleRedecide = true;
             background.evaluateSchedule();
         })
     }
@@ -124,6 +100,9 @@ Rectangle {
     // was chosen may depend on what the other monitors were showing at that
     // moment. Kept in the config so a restart does not decide again.
     readonly property string scheduleKey: wallpaper.configuration.ScheduleAppliedKey
+    // Set when the schedule or a playlist was edited: the current step is
+    // decided again, keeping what is showing if that is still a valid choice.
+    property bool scheduleRedecide: false
     function setScheduleKey(key) {
         if (wallpaper.configuration.ScheduleAppliedKey !== key)
             wallpaper.configuration.ScheduleAppliedKey = key;
@@ -167,44 +146,49 @@ Rectangle {
     function evaluateSchedule() {
         scheduleTimer.stop();
         const conf = background.scheduleConf;
-        if (!conf.enabled || conf.slots.length === 0) return;
+        if (!conf.enabled || conf.slots.length === 0) {
+            presence.until = 0;
+            return;
+        }
         // wait for real sun times rather than acting on the placeholder ones
         if (Sched.usesSun(conf) && !sunSchedule.ready) return;
 
         const now = Date.now();
         const res = Sched.resolve(conf, now, scheduleSunTimes(), scheduleItemAvailable);
-        let wake = res ? res.nextChangeAt : null;
-
-        const hold = scheduleHoldUntil();
-        if (hold > now) {
-            // a wallpaper picked by hand stays until the next slot fires
-            if (wake === null || hold < wake) wake = hold;
-        } else {
-            if (hold) setScheduleHoldUntil(0);
-            // Changes are deferred while the wallpaper is paused (e.g. behind
-            // a fullscreen window); okChanged brings us back here.
-            if (res && res.item && res.key !== background.scheduleKey && background.ok) {
-                setScheduleKey(res.key);
-                // a playlist skips ahead past wallpapers other monitors show
-                const item = Sched.pickCandidate(res, presence.others(),
-                                                 wallpaper.configuration.WallpaperWorkShopId);
-                if (wallpaper.configuration.WallpaperWorkShopId !== item.wid ||
-                    wallpaper.configuration.WallpaperSource !== item.source) {
-                    console.log(`schedule: ${Sched.describeTrigger(res.slot.trigger)} -> ${item.wid}` +
-                                (item === res.item ? "" : ` (${res.item.wid} is on another monitor)`));
-                    wallpaper.configuration.WallpaperWorkShopId = item.wid;
-                    wallpaper.configuration.WallpaperSource = item.source;
-                }
-                // the other monitors may decide before the binding catches up
-                presence.wid = item.wid;
+        // the decision itself is in schedule.mjs, where it is tested
+        const d = Sched.decide(res, now, {
+            key: background.scheduleKey,
+            holdUntil: scheduleHoldUntil(),
+            ok: background.ok,
+            redecide: background.scheduleRedecide,
+            // a playlist skips ahead past wallpapers other monitors show
+            taken: Sched.takenBy(presence.othersDetailed(), now),
+            current: wallpaper.configuration.WallpaperWorkShopId
+        });
+        if (d.clearHold) setScheduleHoldUntil(0);
+        if (d.item) {
+            background.scheduleRedecide = false;
+            setScheduleKey(d.key);
+            if (wallpaper.configuration.WallpaperWorkShopId !== d.item.wid ||
+                wallpaper.configuration.WallpaperSource !== d.item.source) {
+                console.log(`schedule: ${Sched.describeTrigger(res.slot.trigger)} -> ${d.item.wid}` +
+                            (d.item === res.item ? "" : ` (${res.item.wid} is on another monitor)`));
+                wallpaper.configuration.WallpaperWorkShopId = d.item.wid;
+                wallpaper.configuration.WallpaperSource = d.item.source;
             }
+            // the other monitors may decide before the binding catches up
+            presence.wid = d.item.wid;
         }
+        presence.until = d.staysUntil;
 
         // Re-check at least once a minute: QML timers do not account for
         // time spent suspended, and the system clock can be changed.
-        const delay = wake === null ? 60000 : wake - now + 100;
+        const delay = d.wake === null ? 60000 : d.wake - now + 100;
         scheduleTimer.interval = Math.max(1000, Math.min(60000, delay));
         scheduleTimer.start();
+
+        // the first evaluation decides what the first backend shows
+        background.startBackend();
     }
     Timer {
         id: scheduleTimer
@@ -224,16 +208,12 @@ Rectangle {
         if (edited) {
             // an edited schedule takes effect right away
             setScheduleHoldUntil(0);
-            setScheduleKey("");
+            background.scheduleRedecide = true;
         } else if (picked) {
             const res = Sched.resolve(background.scheduleConf, Date.now(), scheduleSunTimes(), scheduleItemAvailable);
             setScheduleHoldUntil(res && res.nextSlotAt ? res.nextSlotAt : 0);
         }
         evaluateSchedule();
-    }
-    Connections {
-        target: ttyMonitor
-        function onTtySwitch(sleep) { if (!sleep) background.evaluateSchedule(); }
     }
     onOkChanged: if (background.ok) background.evaluateSchedule()
 
@@ -276,12 +256,9 @@ Rectangle {
     property string wallpaperPath
     property string wallpaperType
 
-    signal sig_backendFirstFrame(string backname)
-    function onBackendFirstFrame(backname) {
-        console.error(`backend ${backname} first frame`);
-        if (wallpaper.hasOwnProperty('accentColor'))
-            wallpaper.accentColorChanged();
-    }
+    // a backend has drawn; `item` is the backend's root, so that a late frame
+    // from a wallpaper on its way out is not taken for the incoming one's
+    signal sig_backendFirstFrame(string backname, var item)
 
     Component.onDestruction: {
         if(mouseHooker) {
@@ -307,17 +284,13 @@ Rectangle {
         sourceCallback();
     }
 
-    function getWorkshopIDPath() {
-        return Common.getWorkshopDir(this.steamlibrary) + `/${this.workshopid}`;
-    }
-
     onMouseInputChanged: {
         if(this.mouseInput) {
             hookTimer.start();
         }
         else if(this.mouseHooker) {
             this.mouseHooker.target = null;
-            this.mouseHooker.destroy;
+            this.mouseHooker.destroy();
             this.mouseHooker = null;
         }
     }
@@ -394,7 +367,7 @@ Rectangle {
         repeat: false
         interval: 300
         onTriggered: {
-            backendLoader.item.pause();
+            if(backendLoader.item) backendLoader.item.pause();
             playTimer.start();
         }
     }
@@ -418,11 +391,8 @@ Rectangle {
         repeat: false
         interval: 200
         onTriggered: {
-            // let an incoming wallpaper draw and fade in before pausing it
-            if(!background.ok && backendLoader.inTransition) {
-                restart();
-                return;
-            }
+            // autoPause comes back here while an incoming wallpaper still has
+            // to draw and fade in
             background.autoPause();
         }
     }
@@ -436,6 +406,8 @@ Rectangle {
         // in, and only then is the old one dropped.
         property var holder: null
         property var oldHolder: null
+        // the backend in oldHolder, still playing under the incoming one
+        property var oldItem: null
         property bool waiting: false
         readonly property bool inTransition: waiting || fadeAnim.running
         // Just above the point where the scene graph stops drawing an item,
@@ -462,15 +434,29 @@ Rectangle {
             easing.type: Easing.InOutQuad
             onFinished: backendLoader.dropOld()
         }
-        // for backends that never report a first frame, or are paused before it
+        // For backends that never report a first frame. A scene always does
+        // once it has loaded, so a scene that stays silent has failed (its
+        // files are damaged, say): what is on screen is kept. The other
+        // backends are shown regardless.
         Timer {
             id: firstFrameTimeout
-            interval: 5000
-            onTriggered: backendLoader.reveal()
+            property bool giveUp: false
+            interval: giveUp ? 15000 : 5000
+            onTriggered: {
+                if(giveUp) {
+                    console.error(`wallpaper ${background.workshopid} never drew a frame, keeping the previous one`);
+                    backendLoader.settle();
+                    background.autoPause();
+                } else {
+                    backendLoader.reveal();
+                }
+            }
         }
 
         Component.onCompleted: {
-            background.sig_backendFirstFrame.connect(this.reveal);
+            background.sig_backendFirstFrame.connect((backname, item) => {
+                if(item === backendLoader.item) backendLoader.reveal();
+            });
             if(background.hasLib) {
                 this.loaded.connect(this.changeMouseTarget);
                 background.mouseHookerChanged.connect(this.changeMouseTarget);
@@ -487,6 +473,11 @@ Rectangle {
         function dropOld() {
             if(this.oldHolder) this.oldHolder.destroy();
             this.oldHolder = null;
+            this.oldItem = null;
+        }
+        function pauseAll() {
+            if(this.item) this.item.pause();
+            if(this.oldItem) this.oldItem.pause();
         }
         // Bring a transition still under way to an end, ahead of a new one.
         function settle() {
@@ -497,14 +488,16 @@ Rectangle {
                 this.holder.destroy();
                 this.holder = this.oldHolder;
                 this.oldHolder = null;
-                this.item = null;
+                this.item = this.oldItem;
+                this.oldItem = null;
             } else if(fadeAnim.running) {
                 fadeAnim.stop();
                 this.holder.opacity = 1;
                 this.dropOld();
             }
         }
-        function load(url, properties) {
+        // `wid`: the wallpaper's id, for backends that take options
+        function load(url, properties, wid) {
             const com = Qt.createComponent(url);
             if(com.status === Component.Ready) {
                 this.settle();
@@ -513,20 +506,36 @@ Rectangle {
                     opacity: fade ? this.hiddenOpacity : 1
                 });
                 let obj = null;
+                let error = "";
+                // lives and dies with the holder
+                if(wid !== undefined)
+                    properties.opts = optionsComponent.createObject(next, { wid: wid });
                 try {
                     obj = com.createObject(next, properties);
                 } catch(e) {
+                    error = String(e);
+                }
+                // createObject reports most failures by returning null
+                if(!obj) {
                     next.destroy();
-                    this.loadInfoShow(e);
+                    if(url === "backend/InfoShow.qml") {
+                        console.error("could not create the info backend:", error || com.errorString());
+                        return;
+                    }
+                    this.loadInfoShow(error || com.errorString() || "Could not create the wallpaper backend.");
                     return;
                 }
                 this.oldHolder = this.holder;
+                this.oldItem = this.item;
                 this.holder = next;
                 this.item = obj;
                 if(fade) {
                     this.waiting = true;
                     if(url === "backend/InfoShow.qml") this.reveal();
-                    else firstFrameTimeout.restart();
+                    else {
+                        firstFrameTimeout.giveUp = url === "backend/Scene.qml";
+                        firstFrameTimeout.restart();
+                    }
                 } else {
                     this.dropOld();
                 }
@@ -588,34 +597,71 @@ Rectangle {
                 return; 
         }
         properties['source'] = background.wallpaperPath;
-        console.error("load backend: "+qmlsource);
-        backendLoader.load(qmlsource, properties);
+        // The id is the wallpaper's folder name. Taken from the source, not
+        // from the config's id, which may be written before or after it.
+        const wid = Common.wallpaperDirOfSource(background.source).split('/').pop();
+        backendLoader.load(qmlsource, properties, wid);
         sourceCallback();
     }
    
     function autoPause() {
-        background.ok
-            ? backendLoader.item.play()
-            : backendLoader.item.pause();
+        const item = backendLoader.item;
+        const old = backendLoader.oldItem;
+        if(background.ok) {
+            if(item) item.play();
+            if(old) old.play();
+            return;
+        }
+        // the wallpaper on its way out stops at once, sound included
+        if(old) old.pause();
+        // the incoming one has to draw and fade in before it can be paused
+        if(backendLoader.inTransition) sourcePauseTimer.restart();
+        else if(item) item.pause();
     }
 
-    Component.onCompleted: {
-        // load first backend
+    // Loads the first backend, once. Held back until the schedule has had its
+    // say, so that a wallpaper the schedule is about to replace is not loaded
+    // first.
+    property bool backendStarted: false
+    function startBackend() {
+        if(backendStarted) return;
+        backendStarted = true;
+        startTimer.stop();
+
         applySource();
 
         // background signal connect
-        background.videoBackendChanged.connect(loadBackend);
+        background.videoBackendChanged.connect(() => {
+            // only videos use the video backend
+            if(background.wallpaperType === 'video') background.loadBackend();
+        });
         background.okChanged.connect(autoPause);
         background.sourceChanged.connect(applySource);
 
         lauchPauseTimer.start();
+    }
+    // sun times normally arrive within a few hundred ms; don't wait for long
+    Timer {
+        id: startTimer
+        interval: 1500
+        onTriggered: background.startBackend()
+    }
 
+    Component.onCompleted: {
         presence.wid = shownWid;
         migrateLegacySchedule();
         migrateSharedPlaylists();
         scheduleSeenConf = wallpaper.configuration.ScheduleConf;
         scheduleSeenPick = wallpaper.configuration.ScheduleManualPick;
+        // starts the backend itself if it got as far as deciding
         evaluateSchedule();
+        if(!backendStarted) {
+            const conf = background.scheduleConf;
+            const waitForSun = conf.enabled && conf.slots.length > 0 &&
+                               Sched.usesSun(conf) && !sunSchedule.ready;
+            if(waitForSun) startTimer.start();
+            else startBackend();
+        }
     }
 }
 }

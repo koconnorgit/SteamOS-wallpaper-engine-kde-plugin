@@ -6,12 +6,14 @@ Item{
     id: videoItem
     anchors.fill: parent
     property alias source: player.source
-    readonly property int displayMode: background.displayMode
-    readonly property real videoRate: background.speed
-    readonly property bool stats: background.mpvStats
+    // this wallpaper's own options (see optionsComponent in main.qml)
+    property var opts
+    readonly property int displayMode: videoItem.opts.displayMode
+    readonly property real videoRate: videoItem.opts.speed
+    readonly property bool stats: videoItem.opts.mpvStats
     property var volumeFade: Common.createVolumeFade(
         videoItem, 
-        Qt.binding(function() { return background.mute ? 0 : background.volume; }),
+        Qt.binding(function() { return videoItem.opts.mute ? 0 : videoItem.opts.volume; }),
         (volume) => { player.volume = volume; }
     )
     
@@ -36,7 +38,7 @@ Item{
         onTriggered: videoItem.displayModeChanged()
     }
     Connections {
-        target: background
+        target: videoItem.opts
         function onDisplayModeChanged() {
             displayModeFixTimer.restart();
         }
@@ -56,12 +58,13 @@ Item{
     Mpv {
         id: player
         anchors.fill: parent
-        mute: background.mute
+        mute: videoItem.opts.mute
         volume: 0
         Connections {
+            target: player
             ignoreUnknownSignals: true
-            onFirstFrame: {
-                background.sig_backendFirstFrame('mpv');
+            function onFirstFrame() {
+                background.sig_backendFirstFrame('mpv', videoItem);
             }
         }
     }

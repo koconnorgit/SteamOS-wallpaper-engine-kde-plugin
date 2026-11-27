@@ -6,10 +6,12 @@ Item{
     id: videoItem
     anchors.fill: parent
     property alias source: player.source
-    property int displayMode: background.displayMode
+    // this wallpaper's own options (see optionsComponent in main.qml)
+    property var opts
+    property int displayMode: videoItem.opts.displayMode
     property var volumeFade: Common.createVolumeFade(
         videoItem, 
-        Qt.binding(function() { return background.mute ? 0 : background.volume; }),
+        Qt.binding(function() { return videoItem.opts.mute ? 0 : videoItem.opts.volume; }),
         (volume) => { audioOut.volume = volume / 100.0; }
     )
 
@@ -30,7 +32,7 @@ Item{
         onTriggered: videoItem.displayModeChanged()
     }
     Connections {
-        target: background
+        target: videoItem.opts
         function onDisplayModeChanged() {
             displayModeFixTimer.restart();
         }
@@ -46,18 +48,18 @@ Item{
         target: videoView.videoSink
         function onVideoFrameChanged() {
             firstFrameWatch.enabled = false;
-            background.sig_backendFirstFrame('QtMultimedia');
+            background.sig_backendFirstFrame('QtMultimedia', videoItem);
         }
     }
     AudioOutput {
         id: audioOut
         volume: 0.0
-        muted: background.mute
+        muted: videoItem.opts.mute
     }
     MediaPlayer {
         id: player
         loops: MediaPlayer.Infinite
-        playbackRate: background.speed
+        playbackRate: videoItem.opts.speed
         videoOutput: videoView
         audioOutput: audioOut
     }

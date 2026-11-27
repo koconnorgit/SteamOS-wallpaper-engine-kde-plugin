@@ -122,6 +122,16 @@ export function mergePlaylists(existing, incoming) {
     return out;
 }
 
+// For saving playlists that were edited while somebody else (another
+// monitor's settings dialog) saved too. `base` is what the edit started from,
+// `mine` the edited list, `theirs` what is stored now. The edit wins for every
+// playlist it knows about, including ones it deleted; playlists added
+// elsewhere in the meantime are kept.
+export function mergeConcurrent(base, mine, theirs) {
+    const known = new Set((base || []).concat(mine || []).map(p => p.id));
+    return (mine || []).concat((theirs || []).filter(p => !known.has(p.id)));
+}
+
 export function clone(conf) {
     return JSON.parse(JSON.stringify(conf));
 }
@@ -311,6 +321,16 @@ export function resolve(conf, now, sun, isAvailable) {
     });
     if (!active) return null;
 
+    // What identifies this firing in the key and the shuffle seed. A clock slot
+    // fires at an exact time. A sun slot's time is an estimate that can move
+    // by a minute between evaluations, so its local date is used instead:
+    // otherwise a shuffled playlist would start over mid-interval.
+    let stamp = String(firedAt);
+    if (active.trigger.type === 'sun') {
+        const d = new Date(firedAt);
+        stamp = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
     const res = {
         slot: active,
         firedAt: firedAt,
@@ -318,7 +338,7 @@ export function resolve(conf, now, sun, isAvailable) {
         candidates: [],
         playlist: null,
         index: -1,
-        key: `${active.id}@${firedAt}`,
+        key: `${active.id}@${stamp}`,
         nextSlotAt: nextSlotAt,
         nextChangeAt: nextSlotAt
     };
@@ -340,7 +360,7 @@ export function resolve(conf, now, sun, isAvailable) {
             // The slot id is part of the shuffle seed: playlists are shared, and
             // two monitors using the same one at the same time should not
             // shuffle it identically. Slot ids are unique to each monitor.
-            res.index = playlistIndex(how.order, items.length, step, `${pl.id}@${firedAt}@${active.id}`);
+            res.index = playlistIndex(how.order, items.length, step, `${pl.id}@${stamp}@${active.id}`);
             res.item = items[res.index];
             res.candidates = items.map((_, i) => items[(res.index + i) % items.length]);
             if (items.length > 1) {
@@ -356,16 +376,73 @@ export function resolve(conf, now, sun, isAvailable) {
 // Keeps monitors from showing the same wallpaper. `taken` holds the workshop
 // ids showing on the other monitors, `current` the one showing on this one.
 // The regular pick is used when it is free. Otherwise the playlist skips
-// ahead to the next free wallpaper, preferably one other than `current`, so
-// that the monitor still changes when its playlist moves on. A slot with a
-// single wallpaper has one candidate and always gets it; so does a playlist
-// with nothing free.
-export function pickCandidate(res, taken, current) {
+// ahead to the next free wallpaper. A slot with a single wallpaper has one
+// candidate and always gets it; so does a playlist with nothing free.
+//
+// When the step has just begun (`sameStep` false) the skip prefers a wallpaper
+// other than `current`, so that the monitor still changes when its playlist
+// moves on. When the same step is decided again, after an edit, it prefers
+// `current`: nothing has moved on, so there is no reason to change.
+export function pickCandidate(res, taken, current, sameStep) {
     if (!res || !res.item) return null;
     const used = taken || [];
     const free = res.candidates.filter(it => used.indexOf(it.wid) < 0);
     if (free.length === 0 || free[0] === res.item) return res.item;
+    if (sameStep) return free.find(it => it.wid === current) || free[0];
     return free.find(it => it.wid !== current) || free[0];
+}
+
+// What a monitor does at one evaluation of its schedule. Pure, so that it
+// can be tested: the caller supplies what it knows and carries out the answer.
+//
+// decide(res, now, state)
+//   res      resolve()'s result, or null
+//   state    key        key of the step applied last
+//            holdUntil  until when a wallpaper picked by hand stays, or 0
+//            ok         false while the wallpaper is paused (no changes then)
+//            redecide   decide the current step again (the schedule or a
+//                       playlist was edited)
+//            taken      workshop ids the other monitors are showing
+//            current    workshop id showing on this monitor
+// Returns:
+//   wake        when to evaluate again, or null for "no particular time"
+//   clearHold   the hold has run out and should be cleared
+//   item        wallpaper to show, or null to leave things as they are
+//   key         key to store when item is set
+//   staysUntil  until when this monitor expects to keep what it shows; 0 when
+//               that is not known. Other monitors use it to tell a wallpaper
+//               that is about to go from one that is staying.
+export function decide(res, now, state) {
+    const out = { wake: res ? res.nextChangeAt : null, clearHold: false, item: null, key: null, staysUntil: 0 };
+    const hold = state.holdUntil || 0;
+    if (hold > now) {
+        // a wallpaper picked by hand stays until the next slot fires
+        if (out.wake === null || hold < out.wake) out.wake = hold;
+        out.staysUntil = hold;
+        return out;
+    }
+    if (hold) out.clearHold = true;
+    // changes wait while the wallpaper is paused, e.g. behind a fullscreen window
+    if (!state.ok) return out;
+    out.staysUntil = res && res.nextChangeAt ? res.nextChangeAt : 0;
+    if (!res || !res.item) return out;
+
+    const sameStep = res.key === state.key;
+    if (sameStep && !state.redecide) return out;
+    out.key = res.key;
+    out.item = pickCandidate(res, state.taken, state.current, sameStep);
+    return out;
+}
+
+// Which of the other monitors' wallpapers to steer clear of. `others` is a
+// list of { wid, until }: what each shows and until when it expects to keep
+// it (0 if unknown). One that is due to change within a moment is left out;
+// its monitor is about to replace it, usually at this very step.
+export const PRESENCE_MARGIN_MS = 2000;
+export function takenBy(others, now) {
+    return (others || [])
+        .filter(o => o && o.wid && !(o.until > 0 && o.until <= now + PRESENCE_MARGIN_MS))
+        .map(o => o.wid);
 }
 
 // ---- display helpers ----
@@ -411,12 +488,20 @@ export function todayMinutes(trigger, now, sun) {
     return d.getHours() * 60 + d.getMinutes();
 }
 
+// Slots in the order they fire today. `clash` marks slots that fire at the
+// same minute as another one: only one of them can be in effect.
 export function sortedSlots(conf, now, sun) {
-    return conf.slots
-        .map((slot, index) => ({ slot: slot, index: index, minutes: todayMinutes(slot.trigger, now, sun) }))
+    const out = conf.slots
+        .map((slot, index) => ({ slot: slot, index: index, minutes: todayMinutes(slot.trigger, now, sun), clash: false }))
         .sort((a, b) => {
             const am = a.minutes === null ? 1e9 : a.minutes;
             const bm = b.minutes === null ? 1e9 : b.minutes;
             return am - bm || a.index - b.index;
         });
+    out.forEach((e, i) => {
+        if (e.minutes === null) return;
+        e.clash = (i > 0 && out[i - 1].minutes === e.minutes) ||
+                  (i + 1 < out.length && out[i + 1].minutes === e.minutes);
+    });
+    return out;
 }

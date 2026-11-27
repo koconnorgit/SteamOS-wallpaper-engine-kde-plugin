@@ -13,13 +13,13 @@ How to read an item:
 | Section | Items | Open |
 | --- | --- | --- |
 | A. Leaks and crashes in normal use | 12 | 0 |
-| S. Schedule, playlists and crossfade | 16 | 16 |
+| S. Schedule, playlists and crossfade | 16 | 0 |
 | H. Hardening against bad workshop content | 21 | 0 |
 | T. Follow-ups to the TEXB0004 / effects fix | 4 | 0 |
 | E. Efficiency | 22 | 22 |
 | R. Redundancy and dead code | 14 | 14 |
 | B. Build | 8 | 8 |
-| Q. Tests | 5 | 5 |
+| Q. Tests | 5 | 1 |
 | N. Found while fixing | 3 | 3 |
 
 ## A. Leaks and crashes in normal use
@@ -48,22 +48,40 @@ All fixed on 27 November 2026. How each was checked:
 
 ## S. Schedule, playlists and crossfade
 
-- [ ] **S1. Two monitors on one playlist change only every other step.** `ui/js/schedule.mjs:363-369`, `ui/main.qml:186-199`. With the same slot time and interval, the first monitor to evaluate skips past the second's outgoing wallpaper and the second then keeps what it has. Simulated by the reviewer: A = a,c,c,e,e,a and B = b,b,d,d,f,f. Fix: have presence carry a "valid until" time and ignore entries that are due to change.
-- [ ] **S2. Re-deciding a step makes a monitor hop.** `ui/main.qml:117-120,224-227`, `ui/js/schedule.mjs:368`. A playlist save or schedule edit blanks the applied key; the "prefer something other than current" rule then picks a different wallpaper for the same step. Fix: do not blank the key on playlist text changes; keep the current wallpaper when it is still a free candidate.
-- [ ] **S3. Outgoing wallpaper takes the incoming one's options.** `ui/main.qml:31-57,195-196`, `ui/backend/Scene.qml:10-16,45-48`, `Mpv.qml:12-16,59`, `QtMultimedia.qml:9-14,55`. Mute, volume, display mode, speed and user properties are shared bindings that switch before the new backend exists. A muted wallpaper can become audible for the wait plus the fade. Fix: pass options at creation or freeze the outgoing holder's values.
-- [ ] **S4. Any first frame reveals the incoming wallpaper** (checked). `ui/main.qml:279,473-486`. The signal carries only a backend name and `reveal()` only checks `waiting`. A late frame from the previous backend can fade in an empty holder. Fix: connect to the specific incoming item.
-- [ ] **S5. Startup loads the saved wallpaper, then the scheduled one** (checked). `ui/main.qml:602-618`. `applySource()` runs before the migrations and `evaluateSchedule()`. Two scene loads whenever the schedule moved on while logged out. Fix: evaluate first.
-- [ ] **S6. Sleep handler calls methods that do not exist** (checked). `ui/main.qml:91-103`. `this.pause()` / `this.play()` on the monitor object. The wallpaper is never paused for suspend. Fix: `backendLoader.item.pause()` / `background.autoPause()`.
-- [ ] **S7. `userPicked` is never reset after Apply.** `ui/config.qml:121,287-291`, `ui/page/WallpaperPage.qml:361`. A later Apply with the dialog still open writes a stale wallpaper back without a new hold. Fix: reset in `saveConfig()`.
-- [ ] **S8. Pausing during a transition handles only the incoming backend.** `ui/main.qml:391-399,466-470,596-600,608`. The outgoing one keeps playing with audio; the incoming one can be paused before its first frame. Fix: pause the old holder too, defer pausing the new one until revealed.
-- [ ] **S9. A backend that fails to create replaces a working wallpaper.** `ui/main.qml:466-470,515-533`. `createObject` returns null instead of throwing, the empty holder is revealed after 5 s, and later calls hit `null.play()`. Fix: treat null like the catch branch; on timeout keep the old holder.
-- [ ] **S10. Global Display/Mute/Volume/Speed may not apply live.** `ui/main.qml:43-76,136-138`. Imperative assignment removes the bindings; the remaining `Connections` are the kind the file's own comment says never fire. Needs a runtime check: change Volume after one scheduled change.
-- [ ] **S11. Editing a slot whose playlist was deleted retargets it silently.** `ui/page/SchedulePage.qml:477-482`. `findIndex` -1 is clamped to 0. Two slots at the same time also shadow one another with no hint (`ui/js/schedule.mjs:306`). Fix: preselect "Nothing yet"; mark shadowed slots.
-- [ ] **S12. Sun-relative playlist slots re-seed when the sun time shifts.** `ui/js/schedule.mjs:321,338,343`. `firedAt` in milliseconds feeds the key, step boundaries and shuffle seed. Depends on KNightTime behaviour. Fix: seed with slot id plus local date.
-- [ ] **S13. Mouse grabber is never destroyed** (checked). `ui/main.qml:320`. `this.mouseHooker.destroy;` has no parentheses.
-- [ ] **S14. Web wallpapers never receive user properties** (checked). `ui/backend/QtWebView.qml:41-45`, `ui/Pyext.qml:34-38`. A callback is passed to a one-argument `readfile`. `getWorkshopIDPath()` (`ui/main.qml:310`) is also wrong for defaultprojects/myprojects. Fix: `.then(...)`, null-check `json.general`, derive the folder from the source.
-- [ ] **S15. Playlist file is last-writer-wins.** `src/PlaylistStore.cpp:27-36,50-54`, `ui/config.qml:110-112,130`. An open settings dialog overwrites changes made elsewhere on Apply. A truncated external edit is read as an empty list and resets every monitor. Fix: debounce `reload()`, ignore unparsable content, merge or reject on mismatch.
-- [ ] **S16. WindowModel.** `ui/WindowModel.qml:99` calls a signal handler as a function (likely throws on activity switch); `:251` logs on every window event in FullScreen pause mode.
+All fixed on 27 November 2026. What changed, where it differs from the fix first proposed:
+
+- **The decision is a tested function.** `Sched.decide()` in `ui/js/schedule.mjs` now holds what `evaluateSchedule` used to do inline (Q1), and `main.qml` only carries out its answer.
+- **S1.** Each monitor publishes until when it expects to keep its wallpaper (`WallpaperPresence.until`); `Sched.takenBy()` ignores a wallpaper due to go within two seconds.
+- **S2.** Edits set a "decide again" flag where they used to blank the applied key. Deciding the same step again keeps the current wallpaper unless the regular pick has become free.
+- **S3.** Each backend is created with an option set of its own (`optionsComponent` in `main.qml`), keyed by the wallpaper's folder name. Nothing is shared between the outgoing and incoming wallpaper, so nothing needs freezing. This also made S10 go away: the options are plain bindings now.
+- **S5.** The first backend is loaded after the first schedule evaluation. With a sun-based schedule that waits for sun times, for at most 1.5 s.
+- **S9.** A scene that has not drawn within 15 s is given up and the previous wallpaper stays; other backends are still shown after 5 s as before.
+- **S11.** Slots that fire at the same minute are marked in the list.
+- **S12.** Sun slots are keyed and seeded by their local date. One consequence: on the first start after this change a sun-slot playlist may pick a different wallpaper once, because its stored key has the old form.
+- **S15.** Saving merges with playlists added elsewhere since the edit began (`Sched.mergeConcurrent`); the store waits 200 ms before re-reading and keeps the last good content when the file does not parse.
+
+How it was checked:
+
+- `node --test source/tests/schedule.test.mjs`: 35 tests, up from 19. They cover the decision (hold, pause, redecide), a two-monitor and a three-monitor simulation, presence expiry, concurrent playlist edits, clashing slots, sun-time drift, DST with a fixed time zone, and parser edge cases. The two-monitor simulation reproduces the old stall when presence expiry is turned off.
+- `tools/qmltest/run.py` runs `main.qml` in a plain window with a stand-in for Plasma's wallpaper item. The `crossfade` scenario covers S4, S8's bookkeeping and S9, including writing the source before the id, two changes 150 ms apart, and a scene that cannot load. The `schedule` scenario covers S5 (one load at start), a playlist step, and a hand pick holding.
+- Not exercised anywhere: S6 (suspend), S7 and S11 (settings dialog), S10 (changing a global option live), S14 (web wallpapers), S16 (activities). They are small and read correct, but need a look in Plasma.
+
+- [x] **S1. Two monitors on one playlist change only every other step.** `ui/js/schedule.mjs:363-369`, `ui/main.qml:186-199`. With the same slot time and interval, the first monitor to evaluate skips past the second's outgoing wallpaper and the second then keeps what it has. Simulated by the reviewer: A = a,c,c,e,e,a and B = b,b,d,d,f,f. Fix: have presence carry a "valid until" time and ignore entries that are due to change.
+- [x] **S2. Re-deciding a step makes a monitor hop.** `ui/main.qml:117-120,224-227`, `ui/js/schedule.mjs:368`. A playlist save or schedule edit blanks the applied key; the "prefer something other than current" rule then picks a different wallpaper for the same step. Fix: do not blank the key on playlist text changes; keep the current wallpaper when it is still a free candidate.
+- [x] **S3. Outgoing wallpaper takes the incoming one's options.** `ui/main.qml:31-57,195-196`, `ui/backend/Scene.qml:10-16,45-48`, `Mpv.qml:12-16,59`, `QtMultimedia.qml:9-14,55`. Mute, volume, display mode, speed and user properties are shared bindings that switch before the new backend exists. A muted wallpaper can become audible for the wait plus the fade. Fix: pass options at creation or freeze the outgoing holder's values.
+- [x] **S4. Any first frame reveals the incoming wallpaper** (checked). `ui/main.qml:279,473-486`. The signal carries only a backend name and `reveal()` only checks `waiting`. A late frame from the previous backend can fade in an empty holder. Fix: connect to the specific incoming item.
+- [x] **S5. Startup loads the saved wallpaper, then the scheduled one** (checked). `ui/main.qml:602-618`. `applySource()` runs before the migrations and `evaluateSchedule()`. Two scene loads whenever the schedule moved on while logged out. Fix: evaluate first.
+- [x] **S6. Sleep handler calls methods that do not exist** (checked). `ui/main.qml:91-103`. `this.pause()` / `this.play()` on the monitor object. The wallpaper is never paused for suspend. Fix: `backendLoader.item.pause()` / `background.autoPause()`.
+- [x] **S7. `userPicked` is never reset after Apply.** `ui/config.qml:121,287-291`, `ui/page/WallpaperPage.qml:361`. A later Apply with the dialog still open writes a stale wallpaper back without a new hold. Fix: reset in `saveConfig()`.
+- [x] **S8. Pausing during a transition handles only the incoming backend.** `ui/main.qml:391-399,466-470,596-600,608`. The outgoing one keeps playing with audio; the incoming one can be paused before its first frame. Fix: pause the old holder too, defer pausing the new one until revealed.
+- [x] **S9. A backend that fails to create replaces a working wallpaper.** `ui/main.qml:466-470,515-533`. `createObject` returns null instead of throwing, the empty holder is revealed after 5 s, and later calls hit `null.play()`. Fix: treat null like the catch branch; on timeout keep the old holder.
+- [x] **S10. Global Display/Mute/Volume/Speed may not apply live.** `ui/main.qml:43-76,136-138`. Imperative assignment removes the bindings; the remaining `Connections` are the kind the file's own comment says never fire. Needs a runtime check: change Volume after one scheduled change.
+- [x] **S11. Editing a slot whose playlist was deleted retargets it silently.** `ui/page/SchedulePage.qml:477-482`. `findIndex` -1 is clamped to 0. Two slots at the same time also shadow one another with no hint (`ui/js/schedule.mjs:306`). Fix: preselect "Nothing yet"; mark shadowed slots.
+- [x] **S12. Sun-relative playlist slots re-seed when the sun time shifts.** `ui/js/schedule.mjs:321,338,343`. `firedAt` in milliseconds feeds the key, step boundaries and shuffle seed. Depends on KNightTime behaviour. Fix: seed with slot id plus local date.
+- [x] **S13. Mouse grabber is never destroyed** (checked). `ui/main.qml:320`. `this.mouseHooker.destroy;` has no parentheses.
+- [x] **S14. Web wallpapers never receive user properties** (checked). `ui/backend/QtWebView.qml:41-45`, `ui/Pyext.qml:34-38`. A callback is passed to a one-argument `readfile`. `getWorkshopIDPath()` (`ui/main.qml:310`) is also wrong for defaultprojects/myprojects. Fix: `.then(...)`, null-check `json.general`, derive the folder from the source.
+- [x] **S15. Playlist file is last-writer-wins.** `src/PlaylistStore.cpp:27-36,50-54`, `ui/config.qml:110-112,130`. An open settings dialog overwrites changes made elsewhere on Apply. A truncated external edit is read as an empty list and resets every monitor. Fix: debounce `reload()`, ignore unparsable content, merge or reject on mismatch.
+- [x] **S16. WindowModel.** `ui/WindowModel.qml:99` calls a signal handler as a function (likely throws on activity switch); `:251` logs on every window event in FullScreen pause mode.
 
 ## H. Hardening against bad workshop content
 
@@ -174,13 +192,13 @@ Measured effect is tracked in [benchmark.md](benchmark.md) where the benchmark c
 
 ## Q. Tests
 
-`node --test source/tests/schedule.test.mjs` passes (19 tests).
+`node --test source/tests/schedule.test.mjs` passes (35 tests; 19 before this work). Q1–Q4 were done together with section S.
 
-- [ ] **Q1. Extract the schedule decision into a pure function.** The hold, key, pause-deferral and skip logic lives in `ui/main.qml:167-233` and cannot be tested from node. Move it to `schedule.mjs` as `decide(conf, now, sun, state)` and test hold expiry, edit versus pick in one Apply, deferral while paused, and key reset.
-- [ ] **Q2. Multi-step, multi-monitor test of `pickCandidate`.** Assert each monitor changes every step and that re-deciding a step is idempotent. Covers S1 and S2.
-- [ ] **Q3. DST.** The test at `tests/schedule.test.mjs:188-196` does nothing outside US zones. Set `process.env.TZ` and add a 02:30 slot on both changes.
-- [ ] **Q4. Edge cases.** Equal-time slots; `playlistIndex` with 0–3 items and across pass boundaries over many seeds; sun input with multi-day lists, invalid entries and negative offsets across midnight; `todayMinutes` fallback (`schedule.mjs:407-409`); sanitisers with `null`, `[]`, `3`, negative minutes; availability changing mid-slot.
-- [ ] **Q5. Scene backend.** There are no C++ unit tests. Two pieces now exist to build on: `scenebench --load-only` loads a list of scenes and reports which reach a first frame, and `tools/fuzz/mutate.py <scene.pkg> <out dir> <count> <seed>` writes damaged copies to feed it. Wiring the two into one command with a pass/fail result would make the check in section H repeatable.
+- [x] **Q1. Extract the schedule decision into a pure function.** The hold, key, pause-deferral and skip logic lives in `ui/main.qml:167-233` and cannot be tested from node. Move it to `schedule.mjs` as `decide(conf, now, sun, state)` and test hold expiry, edit versus pick in one Apply, deferral while paused, and key reset.
+- [x] **Q2. Multi-step, multi-monitor test of `pickCandidate`.** Assert each monitor changes every step and that re-deciding a step is idempotent. Covers S1 and S2.
+- [x] **Q3. DST.** The test at `tests/schedule.test.mjs:188-196` does nothing outside US zones. Set `process.env.TZ` and add a 02:30 slot on both changes.
+- [x] **Q4. Edge cases.** Equal-time slots; `playlistIndex` with 0–3 items and across pass boundaries over many seeds; sun input with multi-day lists, invalid entries and negative offsets across midnight; `todayMinutes` fallback (`schedule.mjs:407-409`); sanitisers with `null`, `[]`, `3`, negative minutes; availability changing mid-slot.
+- [ ] **Q5. Scene backend.** There are no C++ unit tests. Two pieces now exist to build on: `scenebench --load-only` loads a list of scenes and reports which reach a first frame, and `tools/fuzz/mutate.py <scene.pkg> <out dir> <count> <seed>` writes damaged copies to feed it. Wiring the two into one command with a pass/fail result would make the check in section H repeatable. For the QML side there is `tools/qmltest/run.py`, which prints what happened for a person to read; turning its expectations into assertions is the remaining step.
 
 ## Checked and found fine
 

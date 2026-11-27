@@ -4,7 +4,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QJsonDocument>
 #include <QSaveFile>
+#include <QTimer>
+#include <QDebug>
 #include <QStandardPaths>
 
 using namespace wekde;
@@ -42,14 +45,34 @@ private:
     Backend() {
         m_path = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) +
                  QStringLiteral("/wallpaper-engine-kde-playlists.json");
-        connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, &Backend::reload);
-        connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, &Backend::reload);
+        // An editor saving in place is seen as several changes, the first of
+        // them possibly mid-write. Wait for it to go quiet.
+        m_reload.setSingleShot(true);
+        m_reload.setInterval(200);
+        connect(&m_reload, &QTimer::timeout, this, &Backend::reload);
+        connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_reload, qOverload<>(&QTimer::start));
+        connect(&m_watcher,
+                &QFileSystemWatcher::directoryChanged,
+                &m_reload,
+                qOverload<>(&QTimer::start));
         reload();
     }
 
     void reload() {
         QFile file(m_path);
-        if (file.open(QIODevice::ReadOnly)) setText(QString::fromUtf8(file.readAll()));
+        if (! file.exists()) {
+            // deleted: there are no playlists any more
+            setText(QString());
+        } else if (file.open(QIODevice::ReadOnly)) {
+            const QByteArray data = file.readAll();
+            // A file that doesn't parse (half written, or a typo from editing
+            // by hand) is not taken for "no playlists": every monitor would
+            // drop what it is showing. What was read last stays in effect.
+            if (data.trimmed().isEmpty() || ! QJsonDocument::fromJson(data).isNull())
+                setText(QString::fromUtf8(data));
+            else
+                qWarning() << "PlaylistStore: ignoring unparsable" << m_path;
+        }
         watch();
     }
 
@@ -76,6 +99,7 @@ private:
     QString            m_path;
     QString            m_text;
     QFileSystemWatcher m_watcher;
+    QTimer             m_reload;
 };
 
 } // namespace

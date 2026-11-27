@@ -96,7 +96,11 @@ Item {
 
     TaskManager.ActivityInfo { 
         id: activityInfo 
-        onCurrentActivityChanged: virtualDesktopInfo.onCurrentDesktopChanged();
+        // a signal handler can't be called like a function; do what it does
+        onCurrentActivityChanged: {
+            if(wModel.activity === activityInfo.currentActivity)
+                wModel.desktop = virtualDesktopInfo.currentDesktop;
+        }
         Component.onCompleted: {
             wModel.activity = this.currentActivity;
         }
@@ -248,7 +252,6 @@ Item {
             playBy(maxWModel.length === 0);
             break;
         case Common.PauseMode.FullScreen:
-            console.log("fullScreen", fullSModel);
             playBy(fullSModel.length === 0);
             break;
         case Common.PauseMode.Focus:

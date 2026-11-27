@@ -9,7 +9,9 @@ Item {
     anchors.fill: parent
     property alias source: web.url
     property bool hasLib: background.hasLib
-    property int fps: background.fps
+    // this wallpaper's own options (see optionsComponent in main.qml)
+    property var opts
+    property int fps: webItem.opts.fps
     property var readfile
 
     onFpsChanged: {
@@ -38,8 +40,13 @@ Item {
             if(!webobj.generalProperties)
                 webobj.generalProperties = {fps: 24};
             webobj.sigGeneralProperties(webobj.generalProperties);
-            readfile(Common.urlNative(background.getWorkshopIDPath()) + "/project.json", function(text) { 
-                const json = Utils.parseJson(text);
+            // project.json sits next to the page, wherever the wallpaper is
+            // installed (workshop, default projects, own projects)
+            const page = Common.urlNative(String(webItem.source));
+            const dir = page.substring(0, page.lastIndexOf('/'));
+            readfile(dir + "/project.json").then((text) => {
+                const json = Utils.parseJson(String(text));
+                if(!json || !json.general || !json.general.properties) return;
                 webobj.userProperties = json.general.properties;
                 webobj.sigUserProperties(webobj.userProperties);
             });
@@ -55,7 +62,7 @@ Item {
         id: web
         anchors.fill: parent
         enabled: true
-        audioMuted: background.mute
+        audioMuted: webItem.opts.mute
         activeFocusOnPress: false
         webChannel: channel
 
@@ -84,7 +91,7 @@ Item {
                     webItem.play();
                     webItem.pause();
                 }
-                background.sig_backendFirstFrame('QtWebEngine');
+                background.sig_backendFirstFrame('QtWebEngine', webItem);
             }
         }
 

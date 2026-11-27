@@ -107,8 +107,20 @@ ColumnLayout {
 
     function saveConfig() {
         wallpaperPage.saveConfig();
+        // The pick has been applied. From here the dialog follows the schedule
+        // again, or a later Apply would put this wallpaper back.
+        userPicked = false;
         if (playlistsDirty && playlistStore) {
-            if (playlistStore.save(playlistsText)) playlistsDirty = false;
+            // somebody else may have saved playlists since this edit began
+            const merged = Sched.serializePlaylists(Sched.mergeConcurrent(
+                Sched.parsePlaylists(playlistsBase),
+                Sched.parsePlaylists(playlistsText),
+                Sched.parsePlaylists(playlistStore.text)));
+            if (playlistStore.save(merged)) {
+                playlistsDirty = false;
+                playlistsText = merged;
+                playlistsBase = merged;
+            }
             else console.error("could not write", playlistStore.path);
         }
     }
@@ -127,7 +139,12 @@ ColumnLayout {
     property string playlistsText: ""
     property bool   playlistsDirty: false
     readonly property string storedPlaylistsText: playlistStore ? playlistStore.text : ""
-    onStoredPlaylistsTextChanged: if (!playlistsDirty) playlistsText = storedPlaylistsText
+    // the stored text the edits in playlistsText started from
+    property string playlistsBase: ""
+    onStoredPlaylistsTextChanged: if (!playlistsDirty) {
+        playlistsText = storedPlaylistsText;
+        playlistsBase = storedPlaylistsText;
+    }
 
     // this monitor's slots together with the shared playlists
     readonly property var schedule: Sched.withPlaylists(

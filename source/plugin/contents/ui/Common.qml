@@ -253,6 +253,8 @@ QtObject {
         const conf = {
             favor: new Set()
         };
+        // nothing saved yet
+        if (!data) return conf;
         try {
             const jsonStr = Qt.atob(data);
             Object.assign(conf, Utils.parseJson(jsonStr));
