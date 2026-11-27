@@ -101,20 +101,43 @@ Create/destroy cycles:
 
 Between the two runs: warm load, teardown, CPU per frame at 240 fps and GPU use moved by 2 % or less on the means; cold load by 5 % (one scene by 18 %); CPU per frame at 15 fps by 14 %. The leak figures were identical. For the comparison, treat a change smaller than about 5 % (15 % for the two noisy columns) as no change.
 
-## After the fixes
+## After the fixes, 27 November 2026
 
-To be filled in from `tools/bench/run.py after-run1` and `after-run2`, with the same scene set and settings.
+Commit `3ef3699`, with sections A, S, H and T of the review done and most of E, R and B. Two full runs, raw data in [benchmarks/](benchmarks/) as `after-run1` and `after-run2`; the figures are the mean of the two. The desktop shell was restarted about two minutes into run 1; the two runs agree, so run 1 was kept.
 
 | Measure | Baseline | After | Change |
 | --- | ---: | ---: | ---: |
-| Cold load, mean (ms) | 1034 | | |
-| Warm load, mean (ms) | 1019 | | |
-| Teardown, mean (ms) | 25.2 | | |
-| CPU per frame at 15 fps, mean (ms) | 0.605 | | |
-| CPU per frame at 240 fps, mean (ms) | 0.286 | | |
-| GPU use at 240 fps, mean (%) | 30.2 | | |
-| Headless: file descriptors per cycle | +3.00 | | |
-| Window: GPU memory per cycle (MB) | +45.00 | | |
-| Window: resident memory per cycle (MB) | +7.85 | | |
-| Window: time to first frame, median (ms) | 1200 | | |
-| Window: frame gap on destroy, worst (ms) | 30 | | |
+| Cold load, mean (ms) | 1034 | 476 | −54 % |
+| Warm load, mean (ms) | 1019 | 405 | −60 % |
+| Teardown, mean (ms) | 25.2 | 28.2 | +12 % |
+| CPU per frame at 15 fps, mean (ms) | 0.605 | 0.582 | no change |
+| CPU per frame at 240 fps, mean (ms) | 0.286 | 0.280 | no change |
+| GPU use at 240 fps, mean (%) | 30.2 | 16.5 | −45 % |
+| Headless: file descriptors per cycle | +3.00 | 0 | fixed |
+| Headless: time per create/destroy cycle (ms) | 1177 | 635 | −46 % |
+| Window: GPU memory per cycle (MB) | +45.00 | 0 | fixed |
+| Window: resident memory per cycle (MB) | +7.85 | +6.76 | −14 % |
+| Window: time to first frame, median (ms) | 1200 | 258 | −79 % |
+| Window: frame gap on destroy, worst (ms) | 30 | 17.5 | no missed frame |
+
+Per scene:
+
+| Scene | Warm load before (ms) | after | GPU use at 240 fps before (%) | after |
+| --- | ---: | ---: | ---: | ---: |
+| 3593248271 | 269 | 256 | 6.1 | 4.0 |
+| 3602874264 | 1451 | 948 | 36.8 | 26.4 |
+| 3798007377 | 1410 | 375 | 62.1 | 32.6 |
+| 1905244619 | 1702 | 216 | 30.2 | 7.2 |
+| 2276185076 | 261 | 230 | 15.9 | 12.4 |
+
+### Reading the comparison
+
+- **Both leaks are gone.** GPU memory and file descriptors no longer grow with wallpaper switches (A1, A3).
+- **Load time more than halved**, and for the two particle-heavy scenes fell to a fraction (1702 → 216 ms, 1410 → 375 ms). Most of that is the vertex staging buffer, which the review had not found; the rest is shader results remembered in the process and textures no longer decoded once per pass. The scene that is still slow, 3602874264, spends its time decoding 58 large textures.
+- **GPU use fell by about half overall**, and most where the dynamic buffer was largest. That is the per-frame upload now copying only what changed (E6). This measure is coarser than the baseline's spread suggested: single scenes moved by up to 10 points between the two "after" runs, so only the larger differences mean something.
+- **A destroyed wallpaper no longer costs a frame** in the window harness (E1), the worst gap being one refresh interval where it was nearly two.
+- **Teardown measured headless got slightly slower**, 25 → 28 ms. The headless harness destroys the renderer on the calling thread, so it does not see E1; nothing was done to make teardown itself cheaper, and the persistent buffer mapping may account for the 3 ms.
+- **CPU time per frame did not change.** It was small to begin with, and none of the fixes that landed target it; E7, which would, is still open.
+- **Resident memory still grows about 7 MB per switch** in the Qt path. That is N2 in the review, unexplained and unchanged.
+
+The comparison is one machine, five scenes, two runs each side. It shows the direction and rough size of the changes, not a general speed-up figure.

@@ -1,0 +1,285 @@
+{
+ "label": "after-run1",
+ "environment": {
+  "commit": "3ef3699",
+  "dirty": false,
+  "date": "2026-11-27 14:46",
+  "gpu": "NVIDIA GeForce RTX 5070 Ti, 620.73.04",
+  "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
+  "kernel": "7.3.6-2-cachyos",
+  "resolution": "3840x2160"
+ },
+ "scenes": [
+  {
+   "id": "3593248271",
+   "title": "Christmas glowing"
+  },
+  {
+   "id": "3602874264",
+   "title": "relaxing cosmic spring"
+  },
+  {
+   "id": "3798007377",
+   "title": "Autumn Vibes & Chill Lofi Beats 4K 21/9"
+  },
+  {
+   "id": "1905244619",
+   "title": "christmas"
+  },
+  {
+   "id": "2276185076",
+   "title": "Christmas eve"
+  }
+ ],
+ "headless": {
+  "width": 3840,
+  "height": 2160,
+  "scenes": [
+   {
+    "scene": "3593248271",
+    "ok": true,
+    "load_cold_ms": 318.009,
+    "load_warm_ms": 252.571,
+    "teardown_ms": 25.761,
+    "teardown_cold_ms": 29.198,
+    "steady": [
+     {
+      "fps": 15,
+      "seconds": 15.0,
+      "frames": 227,
+      "cpu_ms": 28.568,
+      "gpu_util": 0.0
+     },
+     {
+      "fps": 240,
+      "seconds": 15.0,
+      "frames": 3701,
+      "cpu_ms": 213.148,
+      "gpu_util": 4.357
+     }
+    ]
+   },
+   {
+    "scene": "3602874264",
+    "ok": true,
+    "load_cold_ms": 1071.716,
+    "load_warm_ms": 953.409,
+    "teardown_ms": 28.528,
+    "teardown_cold_ms": 31.006,
+    "steady": [
+     {
+      "fps": 15,
+      "seconds": 15.0,
+      "frames": 227,
+      "cpu_ms": 245.76,
+      "gpu_util": 0.214
+     },
+     {
+      "fps": 240,
+      "seconds": 15.0,
+      "frames": 3701,
+      "cpu_ms": 1506.117,
+      "gpu_util": 29.429
+     }
+    ]
+   },
+   {
+    "scene": "3798007377",
+    "ok": true,
+    "load_cold_ms": 465.516,
+    "load_warm_ms": 374.391,
+    "teardown_ms": 30.665,
+    "teardown_cold_ms": 31.119,
+    "steady": [
+     {
+      "fps": 15,
+      "seconds": 15.0,
+      "frames": 227,
+      "cpu_ms": 273.339,
+      "gpu_util": 0.143
+     },
+     {
+      "fps": 240,
+      "seconds": 15.0,
+      "frames": 3701,
+      "cpu_ms": 1861.102,
+      "gpu_util": 27.071
+     }
+    ]
+   },
+   {
+    "scene": "1905244619",
+    "ok": true,
+    "load_cold_ms": 237.346,
+    "load_warm_ms": 213.499,
+    "teardown_ms": 29.027,
+    "teardown_cold_ms": 29.831,
+    "steady": [
+     {
+      "fps": 15,
+      "seconds": 15.0,
+      "frames": 227,
+      "cpu_ms": 112.923,
+      "gpu_util": 0.0
+     },
+     {
+      "fps": 240,
+      "seconds": 15.0,
+      "frames": 3701,
+      "cpu_ms": 1210.05,
+      "gpu_util": 8.5
+     }
+    ]
+   },
+   {
+    "scene": "2276185076",
+    "ok": true,
+    "load_cold_ms": 269.468,
+    "load_warm_ms": 226.861,
+    "teardown_ms": 26.58,
+    "teardown_cold_ms": 28.278,
+    "steady": [
+     {
+      "fps": 15,
+      "seconds": 15.0,
+      "frames": 227,
+      "cpu_ms": 43.84,
+      "gpu_util": 0.071
+     },
+     {
+      "fps": 240,
+      "seconds": 15.0,
+      "frames": 3701,
+      "cpu_ms": 387.998,
+      "gpu_util": 8.429
+     }
+    ]
+   }
+  ],
+  "cycles": {
+   "count": 40,
+   "total_ms": 25525.118,
+   "fds_before": 3,
+   "fds_after": 3,
+   "threads_before": 1,
+   "threads_after": 1,
+   "rss_kb_before": 526600,
+   "rss_kb_after": 529028
+  }
+ },
+ "window": {
+  "cycles": 30,
+  "window": "1766x994",
+  "samples": {
+   "start": {
+    "fds": 48,
+    "threads": 8,
+    "rss_kb": 540764,
+    "vram_mb": 60
+   },
+   "end": {
+    "fds": 48,
+    "threads": 8,
+    "rss_kb": 752564,
+    "vram_mb": 60
+   }
+  },
+  "load_ms": [
+   293.0,
+   989.0,
+   383.0,
+   217.0,
+   235.0,
+   252.0,
+   938.0,
+   391.0,
+   236.0,
+   236.0,
+   260.0,
+   926.0,
+   376.0,
+   218.0,
+   240.0,
+   264.0,
+   928.0,
+   384.0,
+   221.0,
+   233.0,
+   256.0,
+   920.0,
+   390.0,
+   231.0,
+   240.0,
+   257.0,
+   933.0,
+   389.0,
+   225.0,
+   239.0
+  ],
+  "load_gap_ms": [
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   18.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0
+  ],
+  "drop_gap_ms": [
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   16.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   16.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0,
+   17.0
+  ],
+  "exit": 0
+ }
+}
