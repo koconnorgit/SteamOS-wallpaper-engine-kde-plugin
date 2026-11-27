@@ -103,41 +103,47 @@ Between the two runs: warm load, teardown, CPU per frame at 240 fps and GPU use 
 
 ## After the fixes, 27 November 2026
 
-Commit `3ef3699`, with sections A, S, H and T of the review done and most of E, R and B. Two full runs, raw data in [benchmarks/](benchmarks/) as `after-run1` and `after-run2`; the figures are the mean of the two. The desktop shell was restarted about two minutes into run 1; the two runs agree, so run 1 was kept.
+Measured twice: at commit `3ef3699`, with most of the review done ("after"), and at `92cbf51`, with all of it done and video textures added ("final"). Two full runs each, raw data in [benchmarks/](benchmarks/) as `after-run1/2` and `final-run1/2`; the figures are the mean of each pair. The desktop shell was restarted about two minutes into `after-run1`; its two runs agree, so it was kept.
 
-| Measure | Baseline | After | Change |
-| --- | ---: | ---: | ---: |
-| Cold load, mean (ms) | 1034 | 476 | −54 % |
-| Warm load, mean (ms) | 1019 | 405 | −60 % |
-| Teardown, mean (ms) | 25.2 | 28.2 | +12 % |
-| CPU per frame at 15 fps, mean (ms) | 0.605 | 0.582 | no change |
-| CPU per frame at 240 fps, mean (ms) | 0.286 | 0.280 | no change |
-| GPU use at 240 fps, mean (%) | 30.2 | 16.5 | −45 % |
-| Headless: file descriptors per cycle | +3.00 | 0 | fixed |
-| Headless: time per create/destroy cycle (ms) | 1177 | 635 | −46 % |
-| Window: GPU memory per cycle (MB) | +45.00 | 0 | fixed |
-| Window: resident memory per cycle (MB) | +7.85 | +6.76 | −14 % |
-| Window: time to first frame, median (ms) | 1200 | 258 | −79 % |
-| Window: frame gap on destroy, worst (ms) | 30 | 17.5 | no missed frame |
-
-Per scene:
-
-| Scene | Warm load before (ms) | after | GPU use at 240 fps before (%) | after |
+| Measure | Baseline | After | Final | Change, baseline to final |
 | --- | ---: | ---: | ---: | ---: |
-| 3593248271 | 269 | 256 | 6.1 | 4.0 |
-| 3602874264 | 1451 | 948 | 36.8 | 26.4 |
-| 3798007377 | 1410 | 375 | 62.1 | 32.6 |
-| 1905244619 | 1702 | 216 | 30.2 | 7.2 |
-| 2276185076 | 261 | 230 | 15.9 | 12.4 |
+| Cold load, mean (ms) | 1034 | 476 | 480 | −54 % |
+| Warm load, mean (ms) | 1019 | 405 | 410 | −60 % |
+| Teardown, mean (ms) | 25.2 | 28.2 | 28.9 | +15 % |
+| CPU per frame at 15 fps, mean (ms) | 0.605 | 0.582 | 0.569 | no change |
+| CPU per frame at 240 fps, mean (ms) | 0.286 | 0.280 | 0.282 | no change |
+| GPU use at 240 fps, mean (%) | 30.2 | 16.5 | 23.2 | lower; see below |
+| Headless: file descriptors per cycle | +3.00 | 0 | 0 | fixed |
+| Headless: time per create/destroy cycle (ms) | 1177 | 635 | 636 | −46 % |
+| Window: GPU memory per cycle (MB) | +45.00 | 0 | 0 | fixed |
+| Window: resident memory per cycle (MB) | +7.85 | +6.76 | +6.74 | levels off; see below |
+| Window: time to first frame, median (ms) | 1200 | 258 | 258 | −79 % |
+| Window: frame gap on destroy, worst (ms) | 30 | 17.5 | 18 | no missed frame |
+
+Per scene, baseline to final:
+
+| Scene | Warm load before (ms) | final | GPU use at 240 fps before (%) | after | final |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 3593248271 | 269 | 263 | 6.1 | 4.0 | 8.2 |
+| 3602874264 | 1451 | 948 | 36.8 | 26.4 | 36.4 |
+| 3798007377 | 1410 | 379 | 62.1 | 32.6 | 48.1 |
+| 1905244619 | 1702 | 221 | 30.2 | 7.2 | 10.8 |
+| 2276185076 | 261 | 237 | 15.9 | 12.4 | 12.4 |
 
 ### Reading the comparison
 
 - **Both leaks are gone.** GPU memory and file descriptors no longer grow with wallpaper switches (A1, A3).
-- **Load time more than halved**, and for the two particle-heavy scenes fell to a fraction (1702 → 216 ms, 1410 → 375 ms). Most of that is the vertex staging buffer, which the review had not found; the rest is shader results remembered in the process and textures no longer decoded once per pass. The scene that is still slow, 3602874264, spends its time decoding 58 large textures.
-- **GPU use fell by about half overall**, and most where the dynamic buffer was largest. That is the per-frame upload now copying only what changed (E6). This measure is coarser than the baseline's spread suggested: single scenes moved by up to 10 points between the two "after" runs, so only the larger differences mean something.
+- **Load time more than halved**, and for the two particle-heavy scenes fell to a fraction (1702 → 221 ms, 1410 → 379 ms). Most of that is the vertex staging buffer, which the review had not found; the rest is shader results remembered in the process and textures no longer decoded once per pass. The scene that is still slow, 3602874264, spends its time decoding 58 large textures.
+- **GPU use is lower where the dynamic buffer was largest, and the measure cannot say more than that.** The scene with the 48 MB buffer went from 30 % to about 10 % in both later sessions, which is the per-frame upload now copying only what changed (E6). For the other scenes the "after" and "final" sessions, an hour apart with no relevant code change between them, disagree by more than the "after" session improved on the baseline. The figure is a share of GPU time, which depends on what else the desktop is doing and on the clock speed the card has settled at, so it is only comparable within a session. The earlier claim of a 45 % drop was read off one session and does not stand.
 - **A destroyed wallpaper no longer costs a frame** in the window harness (E1), the worst gap being one refresh interval where it was nearly two.
-- **Teardown measured headless got slightly slower**, 25 → 28 ms. The headless harness destroys the renderer on the calling thread, so it does not see E1; nothing was done to make teardown itself cheaper, and the persistent buffer mapping may account for the 3 ms.
-- **CPU time per frame did not change.** It was small to begin with, and none of the fixes that landed target it; E7, which would, is still open.
-- **Resident memory still grows about 7 MB per switch** in the Qt path. That is N2 in the review, unexplained and unchanged.
+- **Teardown measured headless got slightly slower**, 25 → 29 ms. The headless harness destroys the renderer on the calling thread, so it does not see E1; nothing was done to make teardown itself cheaper, and the persistent buffer mapping may account for the difference.
+- **CPU time per frame did not change.** It was small to begin with. E7 does not show here: none of the five scenes is static, so every one of their frames differs from the last.
+- **Resident memory per switch in the Qt path is not a leak** (N2). Over 30 switches it grows about 7 MB each; a 120-switch run grew 298 MB in total where the 30-switch one grew 244 MB.
 
-The comparison is one machine, five scenes, two runs each side. It shows the direction and rough size of the changes, not a general speed-up figure.
+Not in these tables, measured separately:
+
+- A scene with a 4K video texture costs about 10 ms of CPU per drawn frame, 15 % of a core at the default 15 fps.
+- All 120 installed scene wallpapers load; the sum of their load times at 1080p fell from 49.8 s to 34.5 s.
+- 112 damaged copies of four wallpapers: the renderer before the fixes crashed on 32 of the 72 it was run against, the fixed one on none.
+
+The comparison is one machine, five scenes, two runs a session. It shows the direction and rough size of the changes, not a general speed-up figure.
