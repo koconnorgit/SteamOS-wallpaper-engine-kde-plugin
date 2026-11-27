@@ -34,6 +34,7 @@ Item {
     Connections {
         target: fileHelper
         function onAsyncFinished(id, result) {
+            if (!root) return;
             const resolve = root._pending[id];
             if (!resolve) return;
             delete root._pending[id];
@@ -52,7 +53,8 @@ Item {
         const cache = cacheProjectFiles && String(path).endsWith("/project.json");
         if (cache && _projectFiles.hasOwnProperty(path)) return Promise.resolve(_projectFiles[path]);
         return _async(fileHelper.readFileAsync(path)).then(text => {
-            if (cache) root._projectFiles[path] = text;
+            // `root` is null if this object was destroyed while the read was under way
+            if (cache && root) root._projectFiles[path] = text;
             return text;
         });
     }
@@ -69,7 +71,7 @@ Item {
         const key = `${depth}:${path}`;
         if (_dirSizes.hasOwnProperty(key)) return Promise.resolve(_dirSizes[key]);
         return _async(fileHelper.getDirSizeAsync(path, depth)).then(size => {
-            root._dirSizes[key] = size;
+            if (root) root._dirSizes[key] = size;
             return size;
         });
     }
