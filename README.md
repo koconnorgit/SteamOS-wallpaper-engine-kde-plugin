@@ -12,6 +12,7 @@ Where things are:
 
 - **Schedule tab**: turn the schedule on, add and edit slots, create and reorder playlists.
 - **Wallpapers tab**: the calendar button on each card (and in the detail panel) adds that wallpaper to a playlist or assigns it to a slot.
+- **Settings tab**: Fade Duration sets the length of the crossfade, per monitor.
 
 Behaviour worth knowing:
 
@@ -20,6 +21,8 @@ Behaviour worth knowing:
 - A wallpaper paused behind a fullscreen or maximized window (per the Pause setting) is not changed while paused; it catches up when it resumes.
 - Wallpapers that have been unsubscribed are skipped.
 - The earlier Day / Night switch is converted automatically into a sunrise slot and a sunset slot. The Randomize timer has been removed; use a shuffled playlist instead.
+
+It also adds a **crossfade between wallpapers**: whenever the wallpaper changes, by schedule or by hand, the new one fades in over the old one instead of cutting. The fade is 500 ms by default; set Fade Duration to 0 to switch at once. Both wallpapers run for the length of the fade, so their audio can overlap briefly.
 
 Tests for the schedule logic: `node --test source/tests/schedule.test.mjs`
 
