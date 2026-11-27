@@ -382,8 +382,9 @@ struct Vortex {
     static auto ReadFromJson(const nlohmann::json& j) {
         Vortex v;
         GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
-        if (v.controlpoint >= 8) LOG_ERROR("wrong contropoint index %d", v.controlpoint);
-        v.controlpoint %= 8;
+        if (v.controlpoint >= 8 || v.controlpoint < 0)
+            LOG_ERROR("wrong contropoint index %d", v.controlpoint);
+        v.controlpoint = ((v.controlpoint % 8) + 8) % 8;
 
         GET_JSON_NAME_VALUE_NOWARN(j, "distanceinner", v.distanceinner);
         GET_JSON_NAME_VALUE_NOWARN(j, "distanceouter", v.distanceouter);
@@ -415,8 +416,9 @@ struct ControlPointForce {
     static auto ReadFromJson(const nlohmann::json& j) {
         ControlPointForce v;
         GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
-        if (v.controlpoint >= 8) LOG_ERROR("wrong contropoint index %d", v.controlpoint);
-        v.controlpoint %= 8;
+        if (v.controlpoint >= 8 || v.controlpoint < 0)
+            LOG_ERROR("wrong contropoint index %d", v.controlpoint);
+        v.controlpoint = ((v.controlpoint % 8) + 8) % 8;
 
         GET_JSON_NAME_VALUE_NOWARN(j, "scale", v.scale);
         GET_JSON_NAME_VALUE_NOWARN(j, "threadhold", v.threshold);

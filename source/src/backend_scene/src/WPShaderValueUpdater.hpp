@@ -86,6 +86,7 @@ private:
     Scene*               m_scene;
     WPCameraParallax     m_parallax;
     double               m_dayTime { 0.0f };
+    std::chrono::steady_clock::time_point m_dayTimeUpdated {};
     std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
 
     std::array<float, 2> m_mousePos { 0.5f, 0.5f };

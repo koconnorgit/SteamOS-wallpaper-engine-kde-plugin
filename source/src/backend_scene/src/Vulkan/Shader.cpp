@@ -356,7 +356,7 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
                                                               .size       = block.size,
                                                               .name       = block.name,
                                                               .member_map = {} });
-                auto& ref_block = ref.blocks.front();
+                auto& ref_block = ref.blocks.back();
 
                 vkbinding.binding         = b.binding;
                 vkbinding.descriptorCount = 1;

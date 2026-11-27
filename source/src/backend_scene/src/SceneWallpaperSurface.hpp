@@ -6,6 +6,8 @@
 #include <vulkan/vulkan.h>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace wallpaper
 {
@@ -20,7 +22,8 @@ struct RenderInitInfo {
     bool enable_valid_layer { false };
     bool offscreen { false };
 
-    std::span<const std::uint8_t> uuid;
+    // a copy: this struct is handed to the render thread and can outlive its source
+    std::vector<std::uint8_t> uuid;
     TexTiling                     offscreen_tiling { TexTiling::OPTIMAL };
     VulkanSurfaceInfo             surface_info;
 

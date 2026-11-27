@@ -136,10 +136,21 @@ std::span<const std::uint8_t> GlExtra::uuid() const { return pImpl->uuid; }
 TexTiling GlExtra::tiling() const { return m_tiling; }
 
 uint GlExtra::genExTexture(ExHandle& handle) {
-    uint memobject, tex;
+    // errors left by earlier gl calls are not ours
+    while (glGetError() != GL_NO_ERROR) {
+    }
+
+    uint memobject { 0 }, tex { 0 };
     glCreateMemoryObjectsEXT(1, &memobject);
     glImportMemoryFdEXT(memobject, handle.size, GL_HANDLE_TYPE_OPAQUE_FD_EXT, handle.fd);
-    CHECK_GL_ERROR_IF_DEBUG()
+    if (int err = (int)glGetError(); err != GL_NO_ERROR) {
+        // the fd is still ours (the swapchain closes it), only a successful import takes it
+        LOG_ERROR("gl: import memory fd %d failed, %s(%d)", handle.fd, GLErrorToStr((GLenum)err), err);
+        glDeleteMemoryObjectsEXT(1, &memobject);
+        return 0;
+    }
+    // gl owns the fd now
+    handle.fd = -1;
 
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -154,7 +165,8 @@ uint GlExtra::genExTexture(ExHandle& handle) {
     CHECK_GL_ERROR_IF_DEBUG()
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    handle.fd = -1;
+    // the texture keeps the memory alive, the object itself would leak it
+    glDeleteMemoryObjectsEXT(1, &memobject);
     return tex;
 }
 

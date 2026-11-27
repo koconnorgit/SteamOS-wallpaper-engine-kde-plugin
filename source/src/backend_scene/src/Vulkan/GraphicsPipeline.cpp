@@ -160,6 +160,8 @@ bool GraphicsPipeline::create(const Device& device, vvk::RenderPass& pass,
         .dynamicStateCount = (uint32_t)m_dynamic_states.size(),
         .pDynamicStates    = m_dynamic_states.data()
     };
+    // the target may hold the layouts of an earlier pipeline (a pass prepared again)
+    pipeline.descriptor_layouts.clear();
     for (auto& info : m_descriptor_set_infos) {
         VkDescriptorSetLayoutCreateInfo create_info {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .pNext = nullptr

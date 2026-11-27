@@ -18,18 +18,27 @@ using namespace wallpaper;
 using namespace Eigen;
 
 void WPShaderValueUpdater::FrameBegin() {
-    /*
+    // g_DayTime: fraction of the local day, 0 at midnight. Once a second is plenty.
+    {
         using namespace std::chrono;
-        auto nowTime = system_clock::to_time_t(system_clock::now());
-        auto cTime   = std::localtime(&nowTime);
-        m_dayTime =
-            (((cTime->tm_hour * 60) + cTime->tm_min) * 60 + cTime->tm_sec) / (24.0f * 60.0f
-       * 60.0f);
-    */
+        auto now = steady_clock::now();
+        if (now - m_dayTimeUpdated >= seconds(1) ||
+            m_dayTimeUpdated == steady_clock::time_point {}) {
+            m_dayTimeUpdated = now;
+            std::time_t t    = system_clock::to_time_t(system_clock::now());
+            std::tm     local {};
+            if (localtime_r(&t, &local) != nullptr) {
+                m_dayTime = (((local.tm_hour * 60) + local.tm_min) * 60 + local.tm_sec) /
+                            (24.0 * 60.0 * 60.0);
+            }
+        }
+    }
+    // the delay comes from scene json and is a divisor
+    const double delay = m_parallax.delay > 0.0 ? (double)m_parallax.delay : 0.1;
     double new_time    = m_mouseDelayedTime + m_scene->frameTime;
-    new_time           = new_time > m_parallax.delay ? m_parallax.delay : new_time;
+    new_time           = new_time > delay ? delay : new_time;
     m_mouseDelayedTime = new_time;
-    double t           = new_time / m_parallax.delay;
+    double t           = new_time / delay;
     m_mousePos         = std::array { (float)algorism::lerp(t, m_mousePos[0], m_mousePosInput[0]),
                               (float)algorism::lerp(t, m_mousePos[1], m_mousePosInput[1]) };
 }

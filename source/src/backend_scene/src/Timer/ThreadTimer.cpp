@@ -16,16 +16,21 @@ void ThreadTimer::Start() {
     std::unique_lock<std::mutex> lock(m_op_mutex);
 
     if (Running()) return;
+    // set before the thread starts, or its first check can see false and exit
+    m_running      = true;
     m_timer_thread = std::thread([this]() {
-        while (Running()) {
+        while (true) {
             {
                 std::unique_lock<std::mutex> lock(m_cond_mutex);
-                m_condition.wait_for(lock, m_interval.load());
+                // returns early only when stopped
+                if (m_condition.wait_for(lock, m_interval.load(), [this]() {
+                        return ! Running();
+                    }))
+                    break;
             }
             if (m_callback) m_callback();
         }
     });
-    m_running      = true;
 }
 
 void ThreadTimer::Stop() {
@@ -33,10 +38,10 @@ void ThreadTimer::Stop() {
     assert(std::this_thread::get_id() != m_timer_thread.get_id());
 
     if (! Running()) return;
-    m_running = false;
-
     {
+        // under the mutex, so the thread can't miss it between its check and its wait
         std::unique_lock<std::mutex> lock(m_cond_mutex);
+        m_running = false;
         m_condition.notify_all();
     }
 

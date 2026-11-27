@@ -15,8 +15,10 @@ public:
     PhysicalFs(std::string_view physicalPath): m_path(physicalPath) {}
     virtual ~PhysicalFs() = default;
     bool Contains(std::string_view path) const override {
-        auto fullpath = m_path / path.substr(1);
-        return std::filesystem::exists(fullpath);
+        // the name comes from scene json; the throwing overload dies on e.g. a too long one
+        std::error_code ec;
+        auto            fullpath = m_path / path.substr(1);
+        return std::filesystem::exists(fullpath, ec) && ! ec;
     }
     std::shared_ptr<IBinaryStream> Open(std::string_view path) override {
         return CreateCBinaryStream(FullPath(path));
@@ -25,6 +27,12 @@ public:
         std::filesystem::path full_path { FullPath(path) };
         std::filesystem::create_directories(full_path.parent_path());
         return CreateCBinaryStreamW(full_path.native());
+    }
+
+    bool Rename(std::string_view from, std::string_view to) override {
+        std::error_code ec;
+        std::filesystem::rename(FullPath(from), FullPath(to), ec);
+        return ! ec;
     }
 
 private:

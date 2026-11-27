@@ -12,7 +12,7 @@ enum class TexTiling
 };
 
 struct ExHandle {
-    int         fd;
+    int         fd { -1 };
     int32_t     width;
     int32_t     height;
     std::size_t size;

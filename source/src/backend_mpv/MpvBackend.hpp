@@ -18,7 +18,9 @@ namespace mpv
 
 struct MpvHandle {
     MpvHandle(mpv_handle* mpv): handle(mpv) {}
-    ~MpvHandle() { mpv_terminate_destroy(handle); }
+    ~MpvHandle() {
+        if (handle) mpv_terminate_destroy(handle);
+    }
     mpv_handle* handle;
 };
 

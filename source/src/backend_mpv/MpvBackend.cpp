@@ -124,12 +124,14 @@ QSGTexture* createTextureFromGl(uint32_t handle, QSize size, QQuickWindow* windo
 
 bool MpvObject::command(const QVariant& params) {
     auto* mpv       = m_mpv;
+    if (! mpv) return false;
     int   errorCode = mpv::qt::get_error(mpv::qt::command(mpv, params));
     return (errorCode >= 0);
 }
 
 bool MpvObject::setProperty(const QString& name, const QVariant& value) {
     auto* mpv       = m_mpv;
+    if (! mpv) return false;
     int   errorCode = mpv::qt::get_error(mpv::qt::set_property(mpv, name, value));
     _Q_DEBUG() << "Setting property" << name << "to" << value;
     return (errorCode >= 0);
@@ -139,7 +141,7 @@ QVariant MpvObject::getProperty(const QString& name, bool* ok) const {
     auto* mpv = m_mpv;
     if (ok) *ok = false;
 
-    if (name.isEmpty()) {
+    if (name.isEmpty() || ! mpv) {
         return QVariant();
     }
     QVariant  result    = mpv::qt::get_property(mpv, name);
@@ -242,7 +244,7 @@ public:
 
     virtual ~MpvRender() {
         _Q_DEBUG() << "destroyed";
-        mpv::qt::command(m_mpv, QVariantList { "stop" });
+        if (m_mpv) mpv::qt::command(m_mpv, QVariantList { "stop" });
 
         if (m_mpv_context) mpv_render_context_free(m_mpv_context);
         m_mpv_context = nullptr;
@@ -294,7 +296,7 @@ public slots:
 
         if (m_mpv_context == nullptr) {
             // mpv_set_wakeup_callback(m_mpv_handle, on_mpv_events, nullptr);
-            if (CreateMpvContex(m_mpv, &m_mpv_context) >= 0) {
+            if (m_mpv && CreateMpvContex(m_mpv, &m_mpv_context) >= 0) {
                 mpv_render_context_set_update_callback(m_mpv_context, on_mpv_redraw, this);
                 Q_EMIT this->inited();
             }
@@ -347,12 +349,18 @@ MpvObject::MpvObject(QQuickItem* parent)
     : QQuickFramebufferObject(parent), m_shared_mpv(std::make_shared<MpvHandle>(mpv_create())) {
     m_mpv = m_shared_mpv.get()->handle;
 
-    if (! m_mpv) _Q_DEBUG() << "could not create mpv context";
+    // mpv_create fails when LC_NUMERIC is not "C", among other things. Every mpv
+    // call below and in the methods is skipped then; the item just shows nothing.
+    if (! m_mpv) {
+        qWarning() << "wekde.mpv: could not create mpv context";
+        return;
+    }
     mpv_set_option_string(m_mpv, "terminal", "no");
     mpv_set_option_string(m_mpv, "msg-level", "all=info");
-    if (mpv_initialize(m_mpv) < 0) _Q_DEBUG() << "could not initialize mpv context";
-
+    // only takes effect before initialize
     mpv_set_option_string(m_mpv, "config", "no");
+    if (mpv_initialize(m_mpv) < 0) qWarning() << "wekde.mpv: could not initialize mpv context";
+
     mpv_set_option_string(m_mpv, "hwdec", "auto");
     mpv_set_option_string(m_mpv, "vo", "libmpv");
     mpv_set_option_string(m_mpv, "loop", "inf");

@@ -40,11 +40,14 @@ public:
         if (! m_curActive) {
             Switch();
         }
+        // no files, or the file is missing: silence
+        if (! m_curActive) return 0;
 
         // loop
         uint64_t frameReads = m_curActive->NextPcmData(pData, frameCount);
         if (frameReads == 0) {
             Switch();
+            if (! m_curActive) return 0;
             frameReads = m_curActive->NextPcmData(pData, frameCount);
         }
         // volume
@@ -59,13 +62,17 @@ public:
     };
     void PassDesc(const Desc& d) override { m_desc = d; }
     void Switch() {
+        if (m_soundPaths.empty()) {
+            m_curActive = nullptr;
+            return;
+        }
         std::string path = m_soundPaths[LoopIndex()];
         // LOG_INFO("Switch to audio file: %s", path.c_str());
         m_curActive = audio::CreateSoundStream(vfs.Open("/assets/" + path), m_desc);
     }
     uint32_t LoopIndex() {
         m_curIndex++;
-        if (m_curIndex == m_soundPaths.size()) m_curIndex = 0;
+        if (m_curIndex >= m_soundPaths.size()) m_curIndex = 0;
         return m_curIndex;
     }
 

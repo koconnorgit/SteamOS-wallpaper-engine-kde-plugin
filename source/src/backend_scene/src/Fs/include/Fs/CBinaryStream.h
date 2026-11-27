@@ -56,7 +56,8 @@ inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view pat
     struct Shared : public CBinaryStream<TBinaryStream> {
         Shared(std::string_view path, std::FILE* file): CBinaryStream<TBinaryStream>(path, file) {};
     };
-    if (std::filesystem::is_directory(path)) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(path, ec)) {
         LOG_ERROR("can't open: \'%s\', which is a directory", path.data());
         return nullptr;
     }

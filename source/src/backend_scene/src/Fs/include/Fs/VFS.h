@@ -86,6 +86,17 @@ public:
 		LOG_ERROR("not found \"%s\" in vfs", path.data());
 		return nullptr;
 	}
+	// both paths have to be in the same mounted fs
+	bool Rename(std::string_view from, std::string_view to) {
+        auto find_it = std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&from](const auto& mfs) {
+			return MountedFs::InMountPoint(mfs.mountPoint, from) &&
+                   mfs.fs->Contains(MountedFs::GetPathInMount(mfs.mountPoint, from));
+        });
+        if (find_it == std::rend(m_mountedFss) || ! MountedFs::InMountPoint(find_it->mountPoint, to))
+            return false;
+        return find_it->fs->Rename(MountedFs::GetPathInMount(find_it->mountPoint, from),
+                                   MountedFs::GetPathInMount(find_it->mountPoint, to));
+	}
 	bool Contains(std::string_view path) const {
 		for(auto iter = m_mountedFss.rbegin();iter < m_mountedFss.rend();iter++) {
 			auto& el = *iter;

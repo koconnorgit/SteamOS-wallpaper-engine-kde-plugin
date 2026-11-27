@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QDateTime>
 
@@ -29,7 +30,14 @@ QString FileHelper::wallpaperConfigDir() const {
     return configDir() + "/wallpaper";
 }
 
+// The id becomes a file name. Anything that could leave the config directory
+// gives an empty path, which the callers treat as "no config".
 QString FileHelper::wallpaperConfigFile(const QString& id) const {
+    if (id.isEmpty() || id == "." || id == ".." || id.contains('/') || id.contains('\\') ||
+        id.contains(QChar(0))) {
+        qWarning() << "FileHelper: not a usable wallpaper id:" << id;
+        return QString();
+    }
     return wallpaperConfigDir() + "/" + id + ".json";
 }
 
@@ -146,13 +154,22 @@ QVariantMap FileHelper::getFolderList(const QString& path, const QVariantMap& op
 }
 
 QVariantMap FileHelper::readWallpaperConfig(const QString& id) {
+    bool ok = false;
+    return readWallpaperConfig(id, &ok);
+}
+
+// *ok is false when there is a file but it can't be read or isn't a json object
+QVariantMap FileHelper::readWallpaperConfig(const QString& id, bool* ok) {
+    *ok              = true;
     QString filePath = wallpaperConfigFile(id);
+    if (filePath.isEmpty()) return QVariantMap();
     QFile file(filePath);
 
     if (!file.exists()) {
         return QVariantMap();
     }
 
+    *ok = false;
     if (!file.open(QIODevice::ReadOnly)) {
         qWarning() << "FileHelper: Cannot read config:" << filePath;
         return QVariantMap();
@@ -160,24 +177,35 @@ QVariantMap FileHelper::readWallpaperConfig(const QString& id) {
 
     QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
     if (doc.isNull() || !doc.isObject()) {
+        qWarning() << "FileHelper: Config is not valid json:" << filePath;
         return QVariantMap();
     }
 
+    *ok = true;
     return doc.object().toVariantMap();
 }
 
 void FileHelper::writeWallpaperConfig(const QString& id, const QVariantMap& changed) {
-    // Read existing config
-    QVariantMap config = readWallpaperConfig(id);
+    QString filePath = wallpaperConfigFile(id);
+    if (filePath.isEmpty()) return;
+
+    // Read existing config. A file that is there but unreadable is left alone:
+    // writing now would replace everything in it with just these changes.
+    bool        readable = false;
+    QVariantMap config   = readWallpaperConfig(id, &readable);
+    if (!readable) {
+        qWarning() << "FileHelper: Not overwriting unreadable config:" << filePath;
+        return;
+    }
 
     // Merge changes
     for (auto it = changed.constBegin(); it != changed.constEnd(); ++it) {
         config[it.key()] = it.value();
     }
 
-    // Write back
-    QString filePath = wallpaperConfigFile(id);
-    QFile file(filePath);
+    // Write back, through a temporary file so a crash or a full disk can't
+    // leave a truncated config behind
+    QSaveFile file(filePath);
 
     if (!file.open(QIODevice::WriteOnly)) {
         qWarning() << "FileHelper: Cannot write config:" << filePath;
@@ -185,12 +213,15 @@ void FileHelper::writeWallpaperConfig(const QString& id, const QVariantMap& chan
     }
 
     QJsonDocument doc(QJsonObject::fromVariantMap(config));
-    file.write(doc.toJson());
+    const QByteArray data = doc.toJson();
+    if (file.write(data) != data.size() || !file.commit()) {
+        qWarning() << "FileHelper: Cannot write config:" << filePath;
+    }
 }
 
 void FileHelper::resetWallpaperConfig(const QString& id) {
     QString filePath = wallpaperConfigFile(id);
-    QFile::remove(filePath);
+    if (!filePath.isEmpty()) QFile::remove(filePath);
 }
 
 } // namespace wekde

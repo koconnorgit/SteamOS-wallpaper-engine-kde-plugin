@@ -22,7 +22,9 @@
 
 #include "VulkanRender/SceneToRenderGraph.hpp"
 #include "VulkanRender/VulkanRender.hpp"
+#include <algorithm>
 #include <atomic>
+#include <exception>
 
 using namespace wallpaper;
 
@@ -129,6 +131,7 @@ public:
         CMD_SET_SCENE,
         CMD_SET_FILLMODE,
         CMD_SET_SPEED,
+        CMD_SET_FPS,
         CMD_STOP,
         CMD_DRAW,
         CMD_NO
@@ -152,6 +155,7 @@ public:
                 CASE_CMD(SET_FILLMODE);
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
+                CASE_CMD(SET_FPS);
                 CASE_CMD(INIT_VULKAN);
             default: break;
             }
@@ -218,14 +222,27 @@ private:
     MHANDLER_CMD(SET_SCENE) {
         if (msg->findObject("scene", &m_scene)) {
             if (m_rg) m_render->clearLastRenderGraph();
-            m_rg = sceneToRenderGraph(*m_scene);
+            m_rg = nullptr;
+            try {
+                m_rg = sceneToRenderGraph(*m_scene);
 
-            if (main_handler.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
-            m_render->compileRenderGraph(*m_scene, *m_rg);
-            m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+                if (main_handler.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
+                m_render->compileRenderGraph(*m_scene, *m_rg);
+                m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+            } catch (const std::exception& e) {
+                // nothing is drawn without a render graph
+                LOG_ERROR("build render graph failed: %s", e.what());
+                m_render->clearLastRenderGraph();
+                m_rg    = nullptr;
+                m_scene = nullptr;
+            }
         }
     }
     MHANDLER_CMD(SET_SPEED) { msg->findFloat("value", &m_speed); }
+    MHANDLER_CMD(SET_FPS) {
+        int32_t fps { 15 };
+        if (msg->findInt32("value", &fps) && fps > 0) frame_timer.SetRequiredFps((u16)fps);
+    }
     MHANDLER_CMD(INIT_VULKAN) {
         std::shared_ptr<RenderInitInfo> info;
         if (msg->findObject("info", &info)) {
@@ -336,7 +353,10 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             int32_t fps { 15 };
             msg->findInt32("value", &fps);
             if (fps >= 5) {
-                m_render_handler->frame_timer.SetRequiredFps((uint8_t)fps);
+                // the frame timer's state belongs to the render thread
+                auto nmsg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_FPS);
+                nmsg->setInt32("value", std::min(fps, 480));
+                nmsg->post();
             }
         } else if (property == PROPERTY_FILLMODE) {
             int32_t value;
@@ -468,7 +488,18 @@ void MainHandler::loadScene() {
             LOG_ERROR("Not supported scene type");
             return;
         }
-        scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, m_user_props_json);
+        // workshop content is not trusted, a bad scene must not take the host process down
+        try {
+            scene =
+                m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager, m_user_props_json);
+        } catch (const std::exception& e) {
+            LOG_ERROR("parse scene \"%s\" failed: %s", m_source.c_str(), e.what());
+            scene = nullptr;
+        }
+        if (! scene) {
+            LOG_ERROR("can't load scene: %s", m_source.c_str());
+            return;
+        }
         scene->vfs.swap(pVfs);
     }
 
@@ -484,12 +515,18 @@ void MainHandler::loadScene() {
         msg->post();
     }
 }
+// Both are called from the render thread, possibly while the wallpaper is being
+// destroyed. Then there is nobody left to tell.
 void MainHandler::sendCmdLoadScene() {
-    auto msg = CreateMsgWithCmd(shared_from_this(), MainHandler::CMD::CMD_LOAD_SCENE);
+    auto self = weak_from_this().lock();
+    if (! self) return;
+    auto msg = CreateMsgWithCmd(self, MainHandler::CMD::CMD_LOAD_SCENE);
     msg->post();
 }
 void MainHandler::sendFirstFrameOk() {
-    auto msg = CreateMsgWithCmd(shared_from_this(), MainHandler::CMD::CMD_FIRST_FRAME);
+    auto self = weak_from_this().lock();
+    if (! self) return;
+    auto msg = CreateMsgWithCmd(self, MainHandler::CMD::CMD_FIRST_FRAME);
     msg->post();
 }
 

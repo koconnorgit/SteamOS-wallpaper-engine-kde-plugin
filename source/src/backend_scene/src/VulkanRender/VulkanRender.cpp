@@ -446,6 +446,7 @@ void VulkanRender::Impl::UpdateCameraFillMode(wallpaper::Scene&   scene,
     if (width == 0) return;
     double sw = scene.ortho[0], sh = scene.ortho[1];
     double fboAspect = width / (double)height, sAspect = sw / sh;
+    if (scene.cameras.count("global") == 0 || scene.cameras.count("global_perspective") == 0) return;
     auto&  gCam    = *scene.cameras.at("global");
     auto&  gPerCam = *scene.cameras.at("global_perspective");
     // assum cam

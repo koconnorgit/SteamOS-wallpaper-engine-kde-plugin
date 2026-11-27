@@ -8,6 +8,10 @@
 #include "SpecTexs.hpp"
 #include "wpscene/WPMaterial.h"
 #include "WPShaderParser.hpp"
+#include "Utils/String.h"
+
+#include <algorithm>
+#include <cstdint>
 
 using namespace wallpaper;
 
@@ -42,9 +46,23 @@ constexpr uint32_t singile_bone_frame = 4 * 9;
 bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto str_path = std::string(path);
     auto pfile    = vfs.Open("/assets/" + str_path);
-    auto memfile  = fs::MemBinaryStream(*pfile);
     if (! pfile) return false;
+    auto memfile  = fs::MemBinaryStream(*pfile);
     auto& f = memfile;
+
+    // Reads past the end return 0, so every loop that scans for a value and every
+    // count taken from the file is checked against what is left.
+    auto remain = [&f]() {
+        return f.Size() - f.Tell();
+    };
+    auto fits = [&remain](u64 count, u64 item_size) {
+        isize left = remain();
+        return left >= 0 && count <= (u64)left / item_size;
+    };
+    auto truncated = [&str_path]() {
+        LOG_ERROR("mdl \"%s\" is truncated or not a supported layout", str_path.c_str());
+        return false;
+    };
 
     mdl.mdlv = ReadMDLVesion(f);
 
@@ -69,6 +87,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     if(curr == 0){
         alt_mdl_format = true;
         while (curr != alt_format_vertex_size_herald_value){
+            if (remain() < 4) return truncated();
             curr = f.ReadUint32();
         }
         curr = f.ReadUint32();
@@ -86,6 +105,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     // if using the alternative MDL format, vertexes contain 7 extra 32-bit chunks between
     // position and blend indices
     uint32_t vertex_num = vertex_size / (alt_mdl_format ? alt_singile_vertex : singile_vertex);
+    if (! fits(vertex_size, 1)) return truncated();
     mdl.vertexs.resize(vertex_num);
     for (auto& vert : mdl.vertexs) {
         for (auto& v : vert.position) v = f.ReadFloat();
@@ -102,6 +122,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     }
 
     uint32_t indices_num = indices_size / singile_indices;
+    if (! fits(indices_size, 1)) return truncated();
     mdl.indices.resize(indices_num);
     for (auto& id : mdl.indices) {
         for (auto& v : id) v = f.ReadUint16();
@@ -120,6 +141,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto& bones = mdl.puppet->bones;
     auto& anims = mdl.puppet->anims;
 
+    // a bone is at least a name terminator and 76 bytes
+    if (! fits(bones_num, 77)) return truncated();
     bones.resize(bones_num);
     for (uint i = 0; i < bones_num; i++) {
         auto&       bone = bones[i];
@@ -161,6 +184,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 for (uint j = 0; j < 16; j++) f.ReadFloat(); // mat
         }
         uint32_t size_unk = f.ReadUint32();
+        if (! fits(size_unk, 12)) return truncated();
         for (uint i = 0; i < size_unk; i++)
             for (int j = 0; j < 3; j++) f.ReadUint32();
 
@@ -188,6 +212,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     std::string mdVersion;
     
     do {
+        // a puppet without animations has no MDLA section at all
+        if (remain() <= 0) break;
         std::string mdPrefix = f.ReadStr();
 
         // sometimes there can be other garbage in this gap, so we need to 
@@ -200,7 +226,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 f.ReadUint32(); // skip 4 bytes
                 uint32_t num_attachments = f.ReadUint16(); // number of attachments in the MDAT section
 
-                for(int i = 0; i < num_attachments; i++){
+                for(uint32_t i = 0; i < num_attachments && remain() > 0; i++){
                     f.ReadUint16(); // skip 2 bytes
                     std::string attachment_name = f.ReadStr(); // attachment name
                     int bytesToRead = mdat_attachment_data_byte_length;
@@ -215,17 +241,24 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     
 
     if(mdType == "MDLA" && mdVersion.length() > 0){
-        mdl.mdla = std::stoi(mdVersion);
+        {
+            i32 mdla { 0 };
+            STRTONUM(mdVersion, mdla);
+            mdl.mdla = mdla;
+        }
         if (mdl.mdla != 0) {
             uint end_size = f.ReadUint32();
             (void)end_size;
 
             uint anim_num = f.ReadUint32();
+            // an animation is more than 24 bytes
+            if (! fits(anim_num, 24)) return truncated();
             anims.resize(anim_num);
             for (auto& anim : anims) {
                 // there can be a variable number of 32-bit 0s between animations
                 anim.id = 0;
                 while(anim.id == 0){
+                    if (remain() < 4) return truncated();
                     anim.id = f.ReadInt32();
                 }
     
@@ -244,6 +277,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 f.ReadInt32();
 
                 uint32_t b_num = f.ReadUint32();
+                if (! fits(b_num, 8)) return truncated();
                 anim.bframes_array.resize(b_num);
                 for (auto& bframes : anim.bframes_array) {
                     f.ReadInt32();
@@ -253,6 +287,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                         LOG_ERROR("wrong bone frame size %d", byte_size);
                         return false;
                     }
+                    if (! fits(byte_size, 1)) return truncated();
                     bframes.frames.resize(num);
                     for (auto& frame : bframes.frames) {
                         for (auto& v : frame.position) v = f.ReadFloat();
@@ -277,6 +312,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 }
                 else{
                     uint32_t unk_extra_uint = f.ReadUint32();
+                    if (! fits(unk_extra_uint, 5)) return truncated();
                     for (uint i = 0; i < unk_extra_uint; i++) {
                         f.ReadFloat();
                         // data is like: {"$$hashKey":"object:2110","frame":1,"name":"random_anim"}
@@ -287,6 +323,23 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         }
     }
     
+    // Playback indexes every bone's frames with indices below `length` and
+    // divides by it, so the two have to agree.
+    std::erase_if(anims, [&str_path](WPPuppet::Animation& anim) {
+        usize min_frames = anim.bframes_array.empty() ? 0 : SIZE_MAX;
+        for (const auto& bframes : anim.bframes_array)
+            min_frames = std::min(min_frames, bframes.frames.size());
+
+        if (anim.length <= 0 || ! (anim.fps > 0.0) || min_frames == 0) {
+            LOG_ERROR("mdl \"%s\": animation %d has no usable frames, ignored",
+                      str_path.c_str(),
+                      anim.id);
+            return true;
+        }
+        if ((usize)anim.length > min_frames) anim.length = (i32)min_frames;
+        return false;
+    });
+
     mdl.puppet->prepared();
 
     LOG_INFO("read puppet: mdlv: %d, nmdls: %d, mdla: %d, bones: %d, anims: %d",

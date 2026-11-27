@@ -35,8 +35,8 @@ public:
     std::string format;
     uint32_t    scale { 1 };
     // fixed size, 0 for following the image size
-    uint32_t    width { 0 };
-    uint32_t    height { 0 };
+    int32_t     width { 0 };
+    int32_t     height { 0 };
     std::string uvs;
 };
 
@@ -47,10 +47,10 @@ private:
 public:
     bool                         FromJson(const nlohmann::json&, fs::VFS& vfs);
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
-    int32_t                      id;
+    int32_t                      id { 0 };
     std::string                  name;
     bool                         visible { true };
-    int32_t                      version;
+    int32_t                      version { 0 };
     std::vector<WPMaterial>      materials;
     std::vector<WPMaterialPass>  passes;
     std::vector<WPEffectCommand> commands;

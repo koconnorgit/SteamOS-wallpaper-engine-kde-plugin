@@ -66,7 +66,7 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
     if(json.contains("combos")) {
         for(const auto& jC:json.at("combos").items()) {
             std::string name;
-            int32_t value;
+            int32_t value { 0 };
             GET_JSON_VALUE(jC.key(), name);
             GET_JSON_VALUE(jC.value(), value);
             combos[name] = value;
@@ -84,7 +84,7 @@ bool WPMaterialPass::FromJson(const nlohmann::json& json) {
 }
 
 bool WPMaterial::FromJson(const nlohmann::json& json) {
-    if(!json.contains("passes") || json.at("passes").size() == 0) {
+    if(!json.contains("passes") || !json.at("passes").is_array() || json.at("passes").size() == 0) {
         LOG_ERROR("material no data");
         return false;
     }
@@ -118,7 +118,7 @@ bool WPMaterial::FromJson(const nlohmann::json& json) {
     if(jContent.contains("combos")) {
         for(const auto& jC:jContent.at("combos").items()) {
             std::string name;
-            int32_t value;
+            int32_t value { 0 };
             GET_JSON_VALUE(jC.key(), name);
             GET_JSON_VALUE(jC.value(), value);
             combos[name] = value;

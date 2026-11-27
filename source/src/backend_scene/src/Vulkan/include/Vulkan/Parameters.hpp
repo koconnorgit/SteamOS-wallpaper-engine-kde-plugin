@@ -57,7 +57,8 @@ struct ExImageParameters : NoCopy {
     vvk::Sampler   sampler;
     VkExtent3D     extent;
     uint           mipmap_level { 1 };
-    int            fd { 0 };
+    // exported memory fd, -1 when none or handed over
+    int            fd { -1 };
 
     ExImageParameters();
     ~ExImageParameters();

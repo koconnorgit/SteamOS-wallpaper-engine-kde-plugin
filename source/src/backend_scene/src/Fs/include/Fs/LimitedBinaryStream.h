@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <memory>
 #include <vector>
 #include "IBinaryStream.h"
@@ -17,7 +18,7 @@ public:
     virtual ~LimitedBinaryStream() = default;
 
 private:
-    bool CheckInArea(idx pos) const { return pos > 0 && pos <= Size(); }
+    bool CheckInArea(idx pos) const { return pos >= 0 && pos <= Size(); }
 
     bool SeekInMPos(void) { return m_infs->SeekSet(m_start + m_pos); }
     bool SeekInPos(idx pos) {
@@ -36,11 +37,10 @@ public:
     virtual usize Read(void* buffer, usize sizeInByte) {
         if (End()) return 0;
 
-        isize isizeInByte = (isize)sizeInByte;
+        // never past the end of this file inside the container
+        isize isizeInByte = std::min((isize)sizeInByte, Size() - m_pos);
+        if (isizeInByte <= 0) return 0;
 
-        if (! CheckInArea(m_pos + isizeInByte)) {
-            isizeInByte = Size() - m_pos;
-        }
         SeekInMPos();
         m_pos += isizeInByte;
 
@@ -60,7 +60,8 @@ public:
         return SeekInPos(pos);
     }
     virtual bool SeekEnd(idx offset) {
-        idx pos = Size() - 1 - offset;
+        // like fseek(SEEK_END): the offset is relative to the end, usually <= 0
+        idx pos = Size() + offset;
         return SeekInPos(pos);
     }
     virtual isize Size() const { return m_end - m_start; }

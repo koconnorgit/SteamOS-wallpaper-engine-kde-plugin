@@ -156,7 +156,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 		GET_JSON_NAME_VALUE(json, "scale", scale);	
 		GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
 		if(jImage.contains("width")) {
-			int32_t w,h;
+			int32_t w { 2 }, h { 2 };
 			GET_JSON_NAME_VALUE(jImage, "width", w);	
 			GET_JSON_NAME_VALUE(jImage, "height", h);	
 			size = {(float)w, (float)h};

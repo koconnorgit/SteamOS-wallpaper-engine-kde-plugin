@@ -14,10 +14,20 @@ bool ParticleChild::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return false;
     }
 
+    // a particle can name itself, or its parent, as a child
+    static thread_local int depth { 0 };
+    if (depth >= 8) {
+        LOG_ERROR("particle children are nested too deep at \"%s\"", name.c_str());
+        return false;
+    }
+
     nlohmann::json jParticle;
     if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + name), jParticle)) return false;
 
-    if (! obj.FromJson(jParticle, vfs)) return false;
+    depth++;
+    bool ok = obj.FromJson(jParticle, vfs);
+    depth--;
+    if (! ok) return false;
 
     GET_JSON_NAME_VALUE_NOWARN(json, "maxcount", maxcount);
     GET_JSON_NAME_VALUE_NOWARN(json, "controlpointstartindex", controlpointstartindex);
@@ -72,7 +82,7 @@ bool Emitter::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "controlpoint", controlpoint);
 
     if (controlpoint >= 8) LOG_ERROR("wrong controlpoint %d", controlpoint);
-    controlpoint = controlpoint % 8; // limited to 0-7
+    controlpoint = ((controlpoint % 8) + 8) % 8; // limited to 0-7
 
     uint32_t _raw_flags { 0 };
     GET_JSON_NAME_VALUE_NOWARN(json, "flags", _raw_flags);

@@ -1,5 +1,6 @@
 #include "WPParticleRawGener.h"
 
+#include <algorithm>
 #include <cstring>
 #include <Eigen/Dense>
 #include <array>
@@ -205,9 +206,15 @@ inline size_t GenRopeParticleData(std::span<const Particle>   particles,
     return i == 0 ? 0 : i - 1;
 }
 
-inline void updateIndexArray(uint16_t index, size_t count, SceneIndexArray& iarray) noexcept {
+// Indices are 16 bit and a particle is four vertices, so a mesh can address
+// this many particles and no more.
+constexpr size_t MAX_PARTICLES_PER_MESH = 65536 / 4;
+
+inline void updateIndexArray(size_t index, size_t count, SceneIndexArray& iarray) noexcept {
     constexpr size_t single_size = 6;
-    const uint16_t   cv          = index * 4;
+    count                        = std::min(count, MAX_PARTICLES_PER_MESH);
+    if (index >= count) return;
+    const uint16_t cv = (uint16_t)(index * 4);
 
     std::array<uint16_t, single_size> single;
     // 0 1 3
@@ -219,7 +226,7 @@ inline void updateIndexArray(uint16_t index, size_t count, SceneIndexArray& iarr
     single[4] = cv + 2;
     single[5] = cv + 3;
     // every particle
-    for (uint16_t i = index; i < count; i++) {
+    for (size_t i = index; i < count; i++) {
         iarray.AssignHalf(i * single_size, single);
         for (auto& x : single) x += 4;
     }
@@ -246,7 +253,9 @@ void WPParticleRawGener::GenGLData(std::span<const std::unique_ptr<ParticleInsta
 
     // LOG_INFO("num: %d", particle_num);
 
-    u16 indexNum = (si.DataCount() * 2) / 6;
+    particle_num = std::min(particle_num, MAX_PARTICLES_PER_MESH);
+
+    usize indexNum = (si.DataCount() * 2) / 6;
     if (particle_num > indexNum) {
         updateIndexArray(indexNum, particle_num, si);
     }

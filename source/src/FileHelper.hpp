@@ -29,6 +29,7 @@ private:
     QString configDir() const;
     QString wallpaperConfigDir() const;
     QString wallpaperConfigFile(const QString& id) const;
+    QVariantMap readWallpaperConfig(const QString& id, bool* ok);
 };
 
 } // namespace wekde

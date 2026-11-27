@@ -73,6 +73,8 @@ private:
 std::unique_ptr<SoundStream>
 wallpaper::audio::CreateSoundStream(std::shared_ptr<wallpaper::fs::IBinaryStream> stream,
                                     const SoundStream::Desc&                      desc) {
+    // a sound file that isn't there
+    if (! stream) return nullptr;
     BStreamWrapper sw { stream };
     auto           decoder = std::make_unique<miniaudio::Decoder<BStreamWrapper>>(std::move(sw));
     decoder->Init(ToSSDesc(desc));

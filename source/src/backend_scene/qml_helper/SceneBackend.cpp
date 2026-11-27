@@ -16,6 +16,8 @@
 #endif
 
 #include <clocale>
+#include <memory>
+#include <mutex>
 #include <atomic>
 #include <array>
 #include <functional>
@@ -81,7 +83,9 @@ public:
           m_enable_valid(valid),
           m_eatFrameOp(eatFrameOp),
           m_window(window),
-          m_first_frame(false) {
+          m_first_frame(false),
+          m_link(std::make_shared<Link>()) {
+        m_link->node = this;
         // texture node must have a texture, so use the default 0 texture.
         m_texture      = createTextureFromGl(0, QSize(64, 64), window);
         m_init_texture = m_texture;
@@ -91,10 +95,14 @@ public:
     }
 
     ~TextureNode() override {
+        {
+            // the renderer's threads may still hold the callbacks
+            std::lock_guard<std::mutex> lock(m_link->mtx);
+            m_link->node = nullptr;
+        }
         for (auto& item : texs_map) {
             auto& exh = item.second;
-            // close(exh.fd);
-            m_glex.deleteTexture(exh.gltex);
+            if (exh.gltex != 0) m_glex.deleteTexture(exh.gltex);
             delete exh.qsg;
         }
         delete m_init_texture;
@@ -111,16 +119,22 @@ public:
         info.enable_valid_layer = m_enable_valid;
         info.offscreen          = true;
         info.offscreen_tiling   = m_glex.tiling();
-        info.uuid               = m_glex.uuid();
-        info.width              = w;
-        info.height             = h;
-        info.redraw_callback    = [this]() {
-            Q_EMIT this->redraw();
+        auto uuid = m_glex.uuid();
+        info.uuid.assign(uuid.begin(), uuid.end());
+        info.width           = w;
+        info.height          = h;
+        // The callbacks run on the renderer's threads and can outlive this node,
+        // so they reach it through the link, which the destructor clears.
+        info.redraw_callback = [link = m_link]() {
+            std::lock_guard<std::mutex> lock(link->mtx);
+            if (link->node) Q_EMIT link->node->redraw();
         };
 
-        auto cb = std::make_shared<wallpaper::FirstFrameCallback>([this]() {
-            m_first_frame = true;
-            Q_EMIT this->redraw();
+        auto cb = std::make_shared<wallpaper::FirstFrameCallback>([link = m_link]() {
+            std::lock_guard<std::mutex> lock(link->mtx);
+            if (! link->node) return;
+            link->node->m_first_frame = true;
+            Q_EMIT link->node->redraw();
         });
         m_scene->setPropertyObject(wallpaper::PROPERTY_FIRST_FRAME_CALLBACK, cb);
         // this send to looper, not in this thread
@@ -147,13 +161,14 @@ public slots:
                         exh->height,
                         exh->fd);
                 ExTex ex_tex;
-                int   fd    = exh->fd;
-                uint  gltex = m_glex.genExTexture(*exh);
+                // takes the fd on success, no close here
+                uint gltex = m_glex.genExTexture(*exh);
 
                 ex_tex.gltex = gltex;
-                ex_tex.qsg   = createTextureFromGl(gltex, QSize(exh->width, exh->height), m_window);
+                ex_tex.qsg   = gltex == 0 ? nullptr
+                                          : createTextureFromGl(
+                                                gltex, QSize(exh->width, exh->height), m_window);
                 texs_map[id] = ex_tex;
-                close(fd);
             }
             auto& newtex = texs_map.at(id);
             if (newtex.qsg != nullptr)
@@ -184,6 +199,12 @@ private:
 
     GlExtra m_glex;
 
+    struct Link {
+        std::mutex   mtx;
+        TextureNode* node { nullptr };
+    };
+    std::shared_ptr<Link> m_link;
+
     struct ExTex {
         // int fd;
         uint        gltex;
@@ -201,6 +222,26 @@ SceneObject::SceneObject(QQuickItem* parent)
     m_scene->setPropertyString(wallpaper::PROPERTY_CACHE_PATH, GetDefaultCachePath());
 }
 
+// Qt can drop the paint node while this item lives (the item moved to another
+// window, the scene graph was invalidated). The renderer's exported images were
+// imported into the old node's gl context and can't be imported again, so the
+// item starts over with a new renderer.
+void SceneObject::resetScene() {
+    m_scene = std::make_shared<wallpaper::SceneWallpaper>();
+    m_scene->init();
+    m_scene->setPropertyString(wallpaper::PROPERTY_CACHE_PATH, GetDefaultCachePath());
+    m_scene->setPropertyInt32(wallpaper::PROPERTY_FPS, m_fps);
+    m_scene->setPropertyInt32(wallpaper::PROPERTY_FILLMODE, (int32_t)ToWPFillMode(m_fillMode));
+    m_scene->setPropertyFloat(wallpaper::PROPERTY_SPEED, m_speed);
+    m_scene->setPropertyFloat(wallpaper::PROPERTY_VOLUME, m_volume);
+    m_scene->setPropertyBool(wallpaper::PROPERTY_MUTED, m_muted);
+    if (! m_assets.isEmpty()) setScenePropertyQurl(wallpaper::PROPERTY_ASSETS, m_assets);
+    if (! m_source.isEmpty()) setScenePropertyQurl(wallpaper::PROPERTY_SOURCE, m_source);
+    if (! m_userProperties.isEmpty())
+        m_scene->setPropertyString(wallpaper::PROPERTY_USER_PROPS, m_userProperties.toStdString());
+    if (m_paused) m_scene->pause();
+}
+
 SceneObject::~SceneObject() { _Q_INFO("Destroy sceneobject", ""); }
 
 void SceneObject::resizeFb() {
@@ -212,6 +253,8 @@ void SceneObject::resizeFb() {
 QSGNode* SceneObject::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     TextureNode* node = static_cast<TextureNode*>(oldNode);
     if (! node) {
+        if (m_had_node) resetScene();
+        m_had_node = true;
         node = new TextureNode(window(), m_scene, m_enable_valid, [this](QQuickWindow* window) {
             return (QSGTexture*)nullptr;
         });
@@ -302,8 +345,14 @@ void SceneObject::setUserProperties(const QString& value) {
     Q_EMIT userPropertiesChanged();
 }
 
-void SceneObject::play() { m_scene->play(); }
-void SceneObject::pause() { m_scene->pause(); }
+void SceneObject::play() {
+    m_paused = false;
+    m_scene->play();
+}
+void SceneObject::pause() {
+    m_paused = true;
+    m_scene->pause();
+}
 
 bool SceneObject::vulkanValid() const { return m_enable_valid; }
 void SceneObject::enableVulkanValid() { m_enable_valid = true; }

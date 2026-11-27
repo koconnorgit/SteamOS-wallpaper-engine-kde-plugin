@@ -45,6 +45,16 @@ using namespace Eigen;
 
 std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
 
+// Sizes come from scene json. A render target of 0 or of millions of pixels is
+// either a mistake or an attack, not something to hand to the gpu.
+constexpr i32 MAX_RT_SIZE { 16384 };
+template<typename T>
+i32 ClampRtSize(T v) {
+    if (! (v >= static_cast<T>(1))) return 1; // also catches nan
+    if (v >= static_cast<T>(MAX_RT_SIZE)) return MAX_RT_SIZE;
+    return static_cast<i32>(v);
+}
+
 struct ParseContext {
     std::shared_ptr<Scene> scene;
     WPShaderValueUpdater*  shader_updater;
@@ -331,6 +341,12 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     }
 
     for (usize i = 0; i < textures.size(); i++) {
+        // shaders have g_Texture0 to g_Texture12, nothing can sample further slots
+        if (i >= WE_GLTEX_NAMES.size()) {
+            LOG_ERROR("material of shader %s has more textures than slots, ignoring the rest",
+                      wpmat.shader.c_str());
+            break;
+        }
         std::string name = textures.at(i);
         ParseSpecTexName(name, wpmat, *pWPShaderInfo);
         material.textures.push_back(name);
@@ -479,8 +495,10 @@ void ParseCamera(ParseContext& context, wpscene::WPSceneGeneral& general) {
     scene.sceneGraph->AppendChild(context.effect_camera_node);
 
     // global camera
-    scene.cameras["global"] = std::make_shared<SceneCamera>((context.ortho_w / (i32)general.zoom),
-                                                            (context.ortho_h / (i32)general.zoom),
+    // integer zoom as before; a zoom below 1 used to divide by zero
+    const i32 zoom          = std::max(1, (i32)general.zoom);
+    scene.cameras["global"] = std::make_shared<SceneCamera>((context.ortho_w / zoom),
+                                                            (context.ortho_h / zoom),
                                                             -5000.0f,
                                                             5000.0f);
     scene.activeCamera      = scene.cameras.at("global").get();
@@ -682,7 +700,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 wpscene::WPImageEffect puppet_effect;
                 wpscene::WPMaterial    puppet_mat;
                 puppet_mat             = wpimgobj.material;
-                puppet_mat.textures[0] = "";
+                if (! puppet_mat.textures.empty()) puppet_mat.textures[0] = "";
                 WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
                 puppet_effect.materials.push_back(puppet_mat);
                 wpimgobj.effects.push_back(puppet_effect);
@@ -749,8 +767,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         // set renderTarget for ping-pong operate
         {
             scene.renderTargets[effect_ppong_a] = {
-                .width      = (uint16_t)wpimgobj.size[0],
-                .height     = (uint16_t)wpimgobj.size[1],
+                .width      = ClampRtSize(wpimgobj.size[0]),
+                .height     = ClampRtSize(wpimgobj.size[1]),
                 .allowReuse = true,
             };
             if (wpimgobj.fullscreen) {
@@ -779,11 +797,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 fboMap["previous"] = inRT;
                 for (usize i = 0; i < wpeffobj.fbos.size(); i++) {
                     const auto& wpfbo  = wpeffobj.fbos.at(i);
-                    std::string rtname = wpfbo.name + "_" + effaddr;
+                    // the effect index keeps two effects on one image, both with
+                    // an fbo of this name, from sharing a render target
+                    std::string rtname = wpfbo.name + "_" + effaddr + "_" + std::to_string(i_eff);
                     if (wpfbo.width > 0 && wpfbo.height > 0) {
                         // fbo with its own size, e.g. a tile to be repeated
-                        scene.renderTargets[rtname] = { .width      = (i32)wpfbo.width,
-                                                        .height     = (i32)wpfbo.height,
+                        scene.renderTargets[rtname] = { .width      = ClampRtSize(wpfbo.width),
+                                                        .height     = ClampRtSize(wpfbo.height),
                                                         .allowReuse = true };
                     } else if (wpimgobj.fullscreen) {
                         scene.renderTargets[rtname]      = { 2, 2, true };
@@ -795,8 +815,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     } else {
                         // i+2 for not override object's rt
                         scene.renderTargets[rtname] = {
-                            .width      = (uint16_t)(wpimgobj.size[0] / (float)wpfbo.scale),
-                            .height     = (uint16_t)(wpimgobj.size[1] / (float)wpfbo.scale),
+                            .width      = ClampRtSize(wpimgobj.size[0] / (float)wpfbo.scale),
+                            .height     = ClampRtSize(wpimgobj.size[1] / (float)wpfbo.scale),
                             .allowReuse = true
                         };
                     }
@@ -839,6 +859,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     for (const auto& el : wppass.bind) {
                         if (fboMap.count(el.name) == 0) {
                             LOG_ERROR("fbo %s not found", el.name.c_str());
+                            continue;
+                        }
+                        if (el.index < 0 || (usize)el.index >= WE_GLTEX_NAMES.size()) {
+                            LOG_ERROR("fbo %s bound to texture slot %d, which doesn't exist",
+                                      el.name.c_str(),
+                                      el.index);
                             continue;
                         }
                         if (wpmat.textures.size() <= (usize)el.index)
@@ -940,7 +966,9 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                                              Vector3f(child_ptr.child->angles.data()));
         child_data     = ChildData(*child_ptr.child);
 
-        child_ptr.max_instancecount *= child_data.maxcount;
+        // both factors come from json; the mesh below holds at most 16384 particles
+        child_ptr.max_instancecount = (i32)std::clamp<i64>(
+            (i64)child_ptr.max_instancecount * std::max<i64>(child_data.maxcount, 1), 1, 16384);
 
     } else {
         p_particle_obj = &wppartobj.particleObj;
@@ -1021,7 +1049,8 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
 
     bool thick_format = material.hasSprite || hastrail;
     {
-        u32 mesh_maxcount = maxcount * (u32)child_ptr.max_instancecount;
+        u32 mesh_maxcount =
+            (u32)std::min<u64>((u64)maxcount * (u64)child_ptr.max_instancecount, 16384);
         if (render_rope)
             SetRopeParticleMesh(mesh, particle_obj, mesh_maxcount, thick_format);
         else
@@ -1174,12 +1203,12 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     {
         context.scene->renderTargets[SpecTex_Default.data()] = {
             .width  = context.ortho_w,
-            .height = context.ortho_w,
+            .height = context.ortho_h,
             .bind   = { .enable = true, .screen = true },
         };
         context.scene->renderTargets[WE_MIP_MAPPED_FRAME_BUFFER.data()] = {
             .width      = context.ortho_w,
-            .height     = context.ortho_w,
+            .height     = context.ortho_h,
             .has_mipmap = true,
             .bind       = { .enable = true, .name = SpecTex_Default.data() }
         };

@@ -6,6 +6,8 @@
 #include "Core/Random.hpp"
 
 #include <Eigen/src/Core/Matrix.h>
+#include <algorithm>
+#include <cmath>
 #include <random>
 #include <array>
 #include <tuple>
@@ -26,11 +28,17 @@ inline std::tuple<u32, bool> FindLastParticle(std::span<const Particle> ps, u32 
 }
 
 inline u32 GetEmitNum(double& timer, float speed) {
-    double emitDur = 1.0f / speed;
+    // a rate of zero or below (it comes from json) emits nothing
+    if (! (speed > 0.0f)) {
+        timer = 0;
+        return 0;
+    }
+    double emitDur = 1.0 / (double)speed;
     if (emitDur > timer) return 0;
-    u32 num = timer / emitDur;
-    while (emitDur < timer) timer -= emitDur;
-    if (timer < 0) timer = 0;
+    // more than a mesh can hold in one frame is never needed
+    u32 num = (u32)std::min(timer / emitDur, 65536.0);
+    timer   = std::fmod(timer, emitDur);
+    if (! (timer >= 0)) timer = 0;
     return num;
 }
 

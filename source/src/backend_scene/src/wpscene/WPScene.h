@@ -32,9 +32,10 @@ public:
     bool                 FromJson(const nlohmann::json&);
     std::array<float, 3> clearcolor { 0.0f, 0.0f, 0.0f };
     bool                 cameraparallax { false };
-    float                cameraparallaxamount;
-    float                cameraparallaxdelay;
-    float                cameraparallaxmouseinfluence;
+    // the editor's defaults; the delay is used as a divisor
+    float                cameraparallaxamount { 0.5f };
+    float                cameraparallaxdelay { 0.1f };
+    float                cameraparallaxmouseinfluence { 0.5f };
     bool                 isOrtho { true };
     Orthogonalprojection orthogonalprojection { 1920, 1080 };
     float                zoom { 1.0f };

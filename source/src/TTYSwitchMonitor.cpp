@@ -7,7 +7,8 @@ TTYSwitchMonitor::TTYSwitchMonitor(QQuickItem *parent)
     : QQuickItem(parent), m_sleeping(false) {
     QDBusConnection systemBus = QDBusConnection::systemBus();
     if (!systemBus.isConnected()) {
-        qFatal("Cannot connect to the D-Bus system bus");
+        // not worth taking the shell down for, the wallpaper just won't know about sleep
+        qWarning("TTYSwitchMonitor: cannot connect to the D-Bus system bus");
         return;
     }
 
@@ -21,7 +22,7 @@ TTYSwitchMonitor::TTYSwitchMonitor(QQuickItem *parent)
     );
 
     if (!connected) {
-        qFatal("Failed to connect to PrepareForSleep signal");
+        qWarning("TTYSwitchMonitor: failed to connect to the PrepareForSleep signal");
     }
 }
 

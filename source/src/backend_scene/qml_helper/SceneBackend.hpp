@@ -100,7 +100,11 @@ public:
 
 private:
     void setScenePropertyQurl(std::string_view, QUrl);
+    void resetScene();
     bool m_inited { false };
+    // a paint node was created before; a second one needs a new renderer
+    bool m_had_node { false };
+    bool m_paused { false };
     bool m_enable_valid { false };
 
     std::shared_ptr<wallpaper::SceneWallpaper> m_scene { nullptr };

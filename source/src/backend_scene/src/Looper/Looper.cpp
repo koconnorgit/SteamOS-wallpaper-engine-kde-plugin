@@ -41,15 +41,14 @@ status_t Looper::start() {
     if (m_running) return status_t::INVALID_OPERATION;
     // using weak_ptr to allow looper deleted at looper->loop() end
     std::weak_ptr<Looper> wlooper = shared_from_this();
-    m_thread                      = std::thread(
-        [](std::weak_ptr<Looper> wlooper) {
-            Looper* looper = nullptr;
-            {
-                looper = wlooper.lock().get();
-                LOG_INFO("%s looper started", looper->name().data());
-                looper->m_running = true;
-            }
+    // set here, not in the thread: stop() must see it even if the thread hasn't run yet
+    m_running = true;
+    m_thread  = std::thread(
+        // the raw pointer is safe to use at start: a looper destroyed on another
+        // thread joins this one first
+        [looper = this](std::weak_ptr<Looper> wlooper) {
             std::string name { looper->name() };
+            LOG_INFO("%s looper started", name.c_str());
             // expired is safe here
             // 1. looper deleted at another thread, will join this, expired() allways true
             // 2. looper deleted at this thread, only in loop(), expired() reliable

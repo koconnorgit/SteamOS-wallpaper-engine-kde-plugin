@@ -66,7 +66,7 @@ VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
                                        .minFilter        = (ToVkType(sam.minFilter)),
                                        .mipmapMode       = VK_SAMPLER_MIPMAP_MODE_LINEAR,
                                        .addressModeU     = (ToVkType(sam.wrapS)),
-                                       .addressModeV     = (ToVkType(sam.wrapS)),
+                                       .addressModeV     = (ToVkType(sam.wrapT)),
                                        .addressModeW     = (ToVkType(sam.wrapT)),
                                        .anisotropyEnable = (false),
                                        .maxAnisotropy    = (1.0f),
@@ -374,6 +374,7 @@ std::size_t TextureKey::HashValue(const TextureKey& k) {
     utils::hash_combine(seed, (int)k.sample.wrapS);
     utils::hash_combine(seed, (int)k.sample.wrapT);
     utils::hash_combine(seed, (int)k.sample.magFilter);
+    utils::hash_combine(seed, (int)k.sample.minFilter);
     return seed;
 }
 
@@ -444,7 +445,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
             .minFilter               = (ToVkType(sam.minFilter)),
             .mipmapMode              = VK_SAMPLER_MIPMAP_MODE_LINEAR,
             .addressModeU            = (ToVkType(sam.wrapS)),
-            .addressModeV            = (ToVkType(sam.wrapS)),
+            .addressModeV            = (ToVkType(sam.wrapT)),
             .addressModeW            = (ToVkType(sam.wrapT)),
             .anisotropyEnable        = (false),
             .maxAnisotropy           = (1.0f),
@@ -466,8 +467,11 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
             opt.has_value()) {
             image_paras = std::move(opt.value());
-        } else
-            break;
+        } else {
+            // a half built entry must not be cached, its later slots have no image
+            LOG_ERROR("create image for texture \"%s\" failed", image.key.c_str());
+            return {};
+        }
 
         std::vector<VmaBufferParameters> stage_bufs;
         std::vector<VkExtent3D>          extents;
@@ -499,6 +503,29 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
     }
     m_tex_map[image.key] = std::move(img_slots);
     return m_tex_map[image.key];
+}
+
+ImageSlotsRef TextureCache::FallbackTex() {
+    static constexpr const char* key = "_wek_fallback_1x1";
+    if (exists(m_tex_map, key)) return m_tex_map.at(key);
+
+    Image img;
+    img.key           = key;
+    img.header.format = TextureFormat::RGBA8;
+    img.header.count  = 1;
+    img.slots.resize(1);
+    auto& slot  = img.slots[0];
+    slot.width  = 1;
+    slot.height = 1;
+    slot.mipmaps.resize(1);
+    auto& mip  = slot.mipmaps[0];
+    mip.width  = 1;
+    mip.height = 1;
+    mip.size   = 4;
+    mip.data   = ImageDataPtr(new uint8_t[4] { 0, 0, 0, 0 }, [](uint8_t* data) {
+        delete[] data;
+    });
+    return CreateTex(img);
 }
 
 void TextureCache::allocateCmd() {

@@ -26,6 +26,7 @@ std::string logToTmpfileWithSha1(std::span<const char> in, const char* fmt, ...)
     std::filesystem::path fspath = std::filesystem::temp_directory_path() / name;
     std::string           path   = fspath.native();
     auto*                 file   = std::fopen(path.c_str(), "w+");
+    if (file == nullptr) return {};
     {
         va_start(args, fmt);
         std::vfprintf(file, fmt, args);

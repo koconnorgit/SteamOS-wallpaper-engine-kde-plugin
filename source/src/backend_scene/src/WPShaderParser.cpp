@@ -9,6 +9,7 @@
 #include "Utils/Sha.hpp"
 #include "Utils/String.h"
 #include "WPCommon.hpp"
+#include "SpecTexs.hpp"
 
 #include "Vulkan/ShaderComp.hpp"
 
@@ -16,11 +17,18 @@
 #include <stack>
 #include <charconv>
 #include <string>
+#include <limits>
+#include <thread>
+#include <functional>
 
 static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 
 #define SHADER_DIR    "spvs01"
 #define SHADER_SUFFIX "spvs"
+// file format version, bump when the layout written by SaveShaderToFile changes
+#define SHADER_CACHE_VERSION 1
+// part of the cache key, bump when the compile options below change
+#define SHADER_COMPILE_VERSION "c1"
 
 using namespace wallpaper;
 
@@ -71,13 +79,21 @@ out vec4 glOutColor;
 
 )";
 
-inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
+inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input, int depth = 0) {
     std::string::size_type pos = 0;
     std::string            output;
     std::string::size_type linePos = std::string::npos;
 
+    // a header that includes itself would never end
+    if (depth > 16) {
+        LOG_ERROR("shader includes are nested too deep, not expanding further");
+        return {};
+    }
+
     while (linePos = input.find("#include", pos), linePos != std::string::npos) {
-        auto lineEnd  = input.find_first_of('\n', linePos);
+        auto lineEnd = input.find_first_of('\n', linePos);
+        // an include on the last line, without a newline
+        if (lineEnd == std::string::npos) lineEnd = input.size();
         auto lineSize = lineEnd - linePos;
         auto lineStr  = input.substr(linePos, lineSize);
         output.append(input.substr(pos, linePos - pos));
@@ -87,7 +103,7 @@ inline std::string LoadGlslInclude(fs::VFS& vfs, const std::string& input) {
         auto includeName = lineStr.substr(inP, inE - inP);
         auto includeSrc  = fs::GetFileContent(vfs, "/assets/shaders/" + includeName);
         output.append("\n//-----include " + includeName + "\n");
-        output.append(LoadGlslInclude(vfs, includeSrc));
+        output.append(LoadGlslInclude(vfs, includeSrc, depth + 1));
         output.append("\n//-----include end\n");
 
         pos = lineEnd;
@@ -117,7 +133,8 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
         */
         if (line.find("// [COMBO]") != std::string::npos) {
             nlohmann::json combo_json;
-            if (PARSE_JSON(line.substr(line.find_first_of('{')), combo_json)) {
+            auto brace = line.find_first_of('{');
+            if (brace != std::string::npos && PARSE_JSON(line.substr(brace), combo_json)) {
                 if (combo_json.contains("combo")) {
                     std::string name;
                     int32_t     value = 0;
@@ -145,6 +162,13 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
                         wput.FromJson(sv_json);
                         i32 index { 0 };
                         STRTONUM(name.substr(9), index);
+                        if (index < 0 || index >= (i32)WE_GLTEX_NAMES.size()) {
+                            // can't be bound; with nothing left in wput the code
+                            // below does nothing for it
+                            LOG_ERROR("shader texture \"%s\" is not a valid slot", name.c_str());
+                            wput  = {};
+                            index = std::numeric_limits<i32>::max();
+                        }
                         if (! wput.default_.empty()) defTexs.push_back({ index, wput.default_ });
                         if (! wput.combo.empty()) {
                             if (index >= texcount)
@@ -419,7 +443,7 @@ inline void FixVaryingMismatch(const std::string& vert_src, std::string& frag_sr
 }
 
 inline std::string GenSha1(std::span<const WPShaderUnit> units) {
-    std::string shas;
+    std::string shas { SHADER_COMPILE_VERSION };
     for (auto& unit : units) {
         shas += utils::genSha1(unit.src);
     }
@@ -430,24 +454,29 @@ inline std::string GetCachePath(std::string_view scene_id, std::string_view file
            std::string(filename) + "." SHADER_SUFFIX;
 }
 
-inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream& file) {
+// A cache file can be empty, truncated or from another version. Anything that
+// doesn't check out is treated as a miss, and the caller compiles again.
+inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream& file,
+                               usize expected_count) {
+    constexpr u32 spirv_magic { 0x07230203 };
+
     codes.clear();
-    i32 ver = ReadSPVVesion(file);
+    if (ReadSPVVesion(file) != SHADER_CACHE_VERSION) return false;
 
     usize count = file.ReadUint32();
-    assert(count <= 16 && count >= 0);
-    if (count > 16) return false;
+    if (count == 0 || count != expected_count) return false;
 
     codes.resize(count);
     for (usize i = 0; i < count; i++) {
         auto& c = codes[i];
 
-        u32 size = file.ReadUint32();
-        assert(size % 4 == 0);
-        if (size % 4 != 0) return false;
+        u32   size   = file.ReadUint32();
+        isize remain = file.Size() - file.Tell();
+        if (size < 4 || size % 4 != 0 || (isize)size > remain) return false;
 
         c.resize(size / 4);
-        file.Read((char*)c.data(), size);
+        if (file.Read((char*)c.data(), size) != size) return false;
+        if (c[0] != spirv_magic) return false;
     }
     return true;
 }
@@ -455,7 +484,7 @@ inline bool LoadShaderFromFile(std::vector<ShaderCode>& codes, fs::IBinaryStream
 inline void SaveShaderToFile(std::span<const ShaderCode> codes, fs::IBinaryStreamW& file) {
     char nop[256] { '\0' };
 
-    WriteSPVVesion(file, 1);
+    WriteSPVVesion(file, SHADER_CACHE_VERSION);
     file.WriteUint32((u32)codes.size());
     for (const auto& c : codes) {
         u32 size = (u32)c.size() * 4;
@@ -476,6 +505,7 @@ std::string WPShaderParser::PreShaderSrc(fs::VFS& vfs, const std::string& src,
     while (pos = src.find("#include", pos), pos != std::string::npos) {
         auto begin = pos;
         pos        = src.find_first_of('\n', pos);
+        if (pos == std::string::npos) pos = src.size();
         newsrc.replace(begin, pos - begin, pos - begin, ' ');
         include.append(src.substr(begin, pos - begin) + "\n");
     }
@@ -523,24 +553,27 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         unit.src = Preprocessor(unit.src, unit.stage, shader_info->combos, unit.preprocess_info);
     });
 
+    // The sources are final before the cache key is taken, so a change to any
+    // step up to here gives a new key by itself.
+    for (usize i = 0; i < units.size(); i++) {
+        auto&               unit     = units[i];
+        WPPreprocessorInfo* pre_info = i >= 1 ? &units[i - 1].preprocess_info : nullptr;
+        WPPreprocessorInfo* post_info =
+            i + 1 < units.size() ? &units[i + 1].preprocess_info : nullptr;
+
+        unit.src = Finalprocessor(unit, pre_info, post_info);
+
+        if (i >= 1 && unit.stage == ShaderType::FRAGMENT &&
+            units[i - 1].stage == ShaderType::VERTEX) {
+            FixVaryingMismatch(units[i - 1].src, unit.src);
+        }
+    }
+
     auto compile = [](std::span<WPShaderUnit> units, std::vector<ShaderCode>& codes) {
         std::vector<vulkan::ShaderCompUnit> vunits(units.size());
         for (usize i = 0; i < units.size(); i++) {
-            auto&               unit     = units[i];
-            auto&               vunit    = vunits[i];
-            WPPreprocessorInfo* pre_info = i >= 1 ? &units[i - 1].preprocess_info : nullptr;
-            WPPreprocessorInfo* post_info =
-                i + 1 < units.size() ? &units[i + 1].preprocess_info : nullptr;
-
-            unit.src = Finalprocessor(unit, pre_info, post_info);
-
-            if (i >= 1 && unit.stage == ShaderType::FRAGMENT &&
-                units[i - 1].stage == ShaderType::VERTEX) {
-                FixVaryingMismatch(units[i - 1].src, unit.src);
-            }
-
-            vunit.src   = unit.src;
-            vunit.stage = ToGLSL(unit.stage);
+            vunits[i].src   = units[i].src;
+            vunits[i].stage = ToGLSL(units[i].stage);
         }
 
         vulkan::ShaderCompOpt opt;
@@ -572,15 +605,25 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
 
         if (vfs.Contains(cache_file_path)) {
             auto cache_file = vfs.Open(cache_file_path);
-            if (! cache_file || ! ::LoadShaderFromFile(codes, *cache_file)) {
-                LOG_ERROR("load shader from \'%s\' failed", cache_file_path.c_str());
-                return false;
-            }
-        } else {
-            if (! compile(units, codes)) return false;
-            if (auto cache_file = vfs.OpenW(cache_file_path); cache_file) {
-                ::SaveShaderToFile(codes, *cache_file);
-            }
+            if (cache_file && ::LoadShaderFromFile(codes, *cache_file, units.size())) return true;
+            LOG_ERROR("shader cache \'%s\' is not usable, compiling again",
+                      cache_file_path.c_str());
+        }
+
+        if (! compile(units, codes)) return false;
+
+        // Written under another name and renamed, so a reader (another monitor
+        // loading the same scene) never sees a partial file.
+        std::string tmp_path =
+            cache_file_path + "." +
+            std::to_string(std::hash<std::thread::id> {}(std::this_thread::get_id())) + ".tmp";
+        bool written { false };
+        if (auto cache_file = vfs.OpenW(tmp_path); cache_file) {
+            ::SaveShaderToFile(codes, *cache_file);
+            written = true;
+        }
+        if (written && ! vfs.Rename(tmp_path, cache_file_path)) {
+            LOG_ERROR("can't save shader cache \'%s\'", cache_file_path.c_str());
         }
         return true;
 

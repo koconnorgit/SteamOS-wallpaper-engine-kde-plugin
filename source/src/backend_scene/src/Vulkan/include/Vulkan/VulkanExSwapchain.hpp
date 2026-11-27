@@ -3,6 +3,8 @@
 #include "Swapchain/ExSwapchain.hpp"
 #include "Device.hpp"
 #include <cstdio>
+#include <unistd.h>
+#include <utility>
 
 namespace wallpaper
 {
@@ -39,14 +41,21 @@ public:
             handle        = ExHandle(index++);
             handle.width  = (i32)h.image.extent.width;
             handle.height = (i32)h.image.extent.height;
-            handle.fd     = h.image.fd;
+            // from here the fd belongs to the handle, until a consumer imports it
+            // and sets it to -1
+            handle.fd     = std::exchange(h.image.fd, -1);
             handle.size   = h.image.mem_reqs.size;
         }
         m_presented  = &m_handles[0].handle;
         m_ready      = &m_handles[1].handle;
         m_inprogress = &m_handles[2].handle;
     }
-    virtual ~VulkanExSwapchain() = default;
+    virtual ~VulkanExSwapchain() {
+        // images no consumer ever imported
+        for (auto& h : m_handles) {
+            if (h.handle.fd >= 0) ::close(h.handle.fd);
+        }
+    }
 
     uint width() const override { return m_extent.width; }
     uint height() const override { return m_extent.height; }

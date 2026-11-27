@@ -126,8 +126,11 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
     {
         auto& tex_name = m_desc.output;
-        assert(IsSpecTex(tex_name));
-        assert(scene.renderTargets.count(tex_name) > 0);
+        // asserts are compiled out in the default build, and at() would throw
+        if (! IsSpecTex(tex_name) || scene.renderTargets.count(tex_name) == 0) {
+            LOG_ERROR("pass output \"%s\" is not a render target", tex_name.c_str());
+            return;
+        }
         auto& rt = scene.renderTargets.at(tex_name);
         if (auto opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
             opt.has_value()) {
@@ -176,11 +179,23 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                 return item.second;
             });
 
-        for (usize i = 0; i < m_desc.vk_textures.size(); i++) {
+        // Every sampler the shader declares gets something bound. A texture that
+        // is missing or failed to load, or a slot the material never named, would
+        // otherwise be sampled unbound, which is undefined.
+        usize tex_count = m_desc.vk_textures.size();
+        for (usize i = 0; i < WE_GLTEX_NAMES.size(); i++) {
+            if (exists(ref.binding_map, WE_GLTEX_NAMES[i])) tex_count = std::max(tex_count, i + 1);
+        }
+        m_desc.vk_textures.resize(tex_count);
+        m_desc.vk_tex_binding.clear();
+        for (usize i = 0; i < tex_count; i++) {
             i32 binding { -1 };
-            if (exists(ref.binding_map, WE_GLTEX_NAMES[i]))
+            if (i < WE_GLTEX_NAMES.size() && exists(ref.binding_map, WE_GLTEX_NAMES[i]))
                 binding = (i32)ref.binding_map.at(WE_GLTEX_NAMES[i]).binding;
             m_desc.vk_tex_binding.push_back(binding);
+            if (binding >= 0 && m_desc.vk_textures[i].slots.empty()) {
+                m_desc.vk_textures[i] = device.tex_cache().FallbackTex();
+            }
         }
     }
 

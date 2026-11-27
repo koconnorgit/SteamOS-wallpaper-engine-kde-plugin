@@ -46,6 +46,8 @@ public:
     std::optional<ExImageParameters> CreateExTex(uint32_t witdh, uint32_t height, VkFormat,
                                                  VkImageTiling);
     ImageSlotsRef                    CreateTex(Image&);
+    // 1x1 transparent black, for samplers that have nothing else to show
+    ImageSlotsRef                    FallbackTex();
 
     std::optional<ImageParameters> Query(std::string_view key, TextureKey content_hash,
                                          bool persist = false);
