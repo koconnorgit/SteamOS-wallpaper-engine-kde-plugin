@@ -33,6 +33,7 @@ ColumnLayout {
     property alias  cfg_MuteAudio:           settingPage.cfg_MuteAudio
     property alias  cfg_MouseInput:          settingPage.cfg_MouseInput
     property alias  cfg_ResumeTime:          settingPage.cfg_ResumeTime
+    property alias  cfg_FadeDuration:        settingPage.cfg_FadeDuration
     property alias  cfg_PauseFilterByScreen: settingPage.cfg_PauseFilterByScreen
     property alias  cfg_PauseOnBatPower:     settingPage.cfg_PauseOnBatPower
     property alias  cfg_PauseBatPercent:     settingPage.cfg_PauseBatPercent

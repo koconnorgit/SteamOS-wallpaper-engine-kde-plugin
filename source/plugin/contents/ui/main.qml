@@ -265,6 +265,8 @@ Rectangle {
     }
 
     property string nowBackend: ""
+    // length of the fade between wallpapers, in ms; 0 switches at once
+    property int fadeDuration: wallpaper.configuration.FadeDuration
 
     property var mouseHooker
     property bool hasLib: Common.checklib_wallpaper(background)
@@ -296,10 +298,10 @@ Rectangle {
         if(type_changed) wallpaperType = type;
         if(path_changed) wallpaperPath = path;
 
-        if(type_changed || is_infobackend || !source) {
+        // A changed wallpaper always gets a fresh backend, so that it can be
+        // faded in over the one it replaces.
+        if(type_changed || path_changed || is_infobackend || !source) {
             loadBackend();
-        } else if(path_changed) {
-            backendLoader.item.source = path;
         }
 
         sourceCallback();
@@ -415,35 +417,118 @@ Rectangle {
         running: false
         repeat: false
         interval: 200
-        onTriggered: background.autoPause();
+        onTriggered: {
+            // let an incoming wallpaper draw and fade in before pausing it
+            if(!background.ok && backendLoader.inTransition) {
+                restart();
+                return;
+            }
+            background.autoPause();
+        }
     }
     // main  
     Item { 
         id: backendLoader
         anchors.fill: parent
         property var item: null
+        // Each backend sits in a holder. A new wallpaper is brought up above
+        // the one showing, kept invisible until it has drawn a frame, faded
+        // in, and only then is the old one dropped.
+        property var holder: null
+        property var oldHolder: null
+        property bool waiting: false
+        readonly property bool inTransition: waiting || fadeAnim.running
+        // Just above the point where the scene graph stops drawing an item,
+        // which the backends need in order to produce their first frame.
+        readonly property real hiddenOpacity: 0.002
 
         signal loaded
 
+        Component {
+            id: holderComponent
+            Rectangle {
+                anchors.fill: parent
+                // covers the old wallpaper where the new one leaves bars
+                color: background.color
+                // blend backing and wallpaper as one image while fading
+                layer.enabled: opacity < 1
+            }
+        }
+        NumberAnimation {
+            id: fadeAnim
+            property: "opacity"
+            to: 1
+            duration: background.fadeDuration
+            easing.type: Easing.InOutQuad
+            onFinished: backendLoader.dropOld()
+        }
+        // for backends that never report a first frame, or are paused before it
+        Timer {
+            id: firstFrameTimeout
+            interval: 5000
+            onTriggered: backendLoader.reveal()
+        }
+
         Component.onCompleted: {
+            background.sig_backendFirstFrame.connect(this.reveal);
             if(background.hasLib) {
                 this.loaded.connect(this.changeMouseTarget);
                 background.mouseHookerChanged.connect(this.changeMouseTarget);
             }
         }
-        Component.onDestruction: {
-            if(this.item) this.item.destroy();
+        function reveal() {
+            if(!backendLoader.waiting) return;
+            backendLoader.waiting = false;
+            firstFrameTimeout.stop();
+            fadeAnim.target = backendLoader.holder;
+            fadeAnim.from = backendLoader.holder.opacity;
+            fadeAnim.restart();
+        }
+        function dropOld() {
+            if(this.oldHolder) this.oldHolder.destroy();
+            this.oldHolder = null;
+        }
+        // Bring a transition still under way to an end, ahead of a new one.
+        function settle() {
+            if(this.waiting) {
+                // the newest wallpaper was never seen: keep what is on screen
+                this.waiting = false;
+                firstFrameTimeout.stop();
+                this.holder.destroy();
+                this.holder = this.oldHolder;
+                this.oldHolder = null;
+                this.item = null;
+            } else if(fadeAnim.running) {
+                fadeAnim.stop();
+                this.holder.opacity = 1;
+                this.dropOld();
+            }
         }
         function load(url, properties) {
             const com = Qt.createComponent(url);
             if(com.status === Component.Ready) {
-                if(this.item) this.item.destroy(100);
-                this.item = null;
+                this.settle();
+                const fade = this.holder !== null && background.fadeDuration > 0;
+                const next = holderComponent.createObject(this, {
+                    opacity: fade ? this.hiddenOpacity : 1
+                });
+                let obj = null;
                 try {
-                    this.item = com.createObject(this, properties);
+                    obj = com.createObject(next, properties);
                 } catch(e) {
+                    next.destroy();
                     this.loadInfoShow(e);
                     return;
+                }
+                this.oldHolder = this.holder;
+                this.holder = next;
+                this.item = obj;
+                if(fade) {
+                    this.waiting = true;
+                    if(url === "backend/InfoShow.qml") this.reveal();
+                    else firstFrameTimeout.restart();
+                } else {
+                    this.dropOld();
                 }
                 this.loaded();
             } else if(com.status == Component.Error) {

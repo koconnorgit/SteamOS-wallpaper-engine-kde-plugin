@@ -24,6 +24,7 @@ Flickable {
     property alias cfg_MuteAudio: ckbox_muteAudio.checked
     property alias cfg_MouseInput: ckbox_mouseInput.checked
     property alias cfg_ResumeTime: resumeSpin.value
+    property alias cfg_FadeDuration: fadeSpin.value
     property alias cfg_PauseFilterByScreen: ckbox_pauseFilterByScreen.checked
 
     property alias cfg_PauseOnBatPower: chkbox_pauseOnBatPower.checked
@@ -167,6 +168,30 @@ Flickable {
                         Layout.fillWidth: true
                         color: Kirigami.Theme.disabledTextColor
                         text: "Time to wait to resume playback from pause"
+                    }
+                }
+            }
+            OptionItem {
+                text: 'Fade Duration'
+                text_color: Kirigami.Theme.textColor
+                icon: '../../images/time.svg'
+                actor: RowLayout {
+                    spacing: 0
+                    RowLayout {
+                        SpinBox {
+                            id: fadeSpin
+                            from: 0
+                            to: 10*1000
+                            stepSize: 50
+                        }
+                        Label { text: " ms"; color: Kirigami.Theme.textColor }
+                    }
+                }
+                contentBottom: ColumnLayout {
+                    Text {
+                        Layout.fillWidth: true
+                        color: Kirigami.Theme.disabledTextColor
+                        text: "Length of the fade when the wallpaper changes, 0 to switch at once"
                     }
                 }
             }

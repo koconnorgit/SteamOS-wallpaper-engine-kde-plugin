@@ -115,6 +115,10 @@
       <label>Resume time from paused (in ms)</label>
       <default>300</default>
     </entry>
+    <entry name="FadeDuration" type="Int">
+      <label>Fade between wallpapers (in ms)</label>
+      <default>500</default>
+    </entry>
     <entry name="Volume" type="Int">
       <label>Volume</label>
       <default>100</default>

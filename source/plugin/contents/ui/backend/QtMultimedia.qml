@@ -41,6 +41,14 @@ Item{
         //fillMode: wallpaper.configuration.FillMode
         anchors.fill: parent
     }
+    Connections {
+        id: firstFrameWatch
+        target: videoView.videoSink
+        function onVideoFrameChanged() {
+            firstFrameWatch.enabled = false;
+            background.sig_backendFirstFrame('QtMultimedia');
+        }
+    }
     AudioOutput {
         id: audioOut
         volume: 0.0
