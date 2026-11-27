@@ -2,10 +2,10 @@
 #include "SceneWallpaperSurface.hpp"
 
 #include "Utils/Logging.h"
+#include "Utils/LoadStats.hpp"
 #include "Looper/Looper.hpp"
 
 #include "Timer/FrameTimer.hpp"
-#include "Utils/FpsCounter.h"
 #include "WPSceneParser.hpp"
 #include "Scene/Scene.h"
 #include "Particle/ParticleSystem.h"
@@ -24,6 +24,10 @@
 #include "VulkanRender/VulkanRender.hpp"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <vector>
+#include <mutex>
+#include <filesystem>
 #include <exception>
 
 using namespace wallpaper;
@@ -201,7 +205,6 @@ private:
             m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);
 
             m_scene->shaderValueUpdater->FrameEnd();
-            // fps_counter.RegisterFrame();
 
             if (! m_scene->first_frame_ok) {
                 m_scene->first_frame_ok = true;
@@ -223,12 +226,28 @@ private:
         if (msg->findObject("scene", &m_scene)) {
             if (m_rg) m_render->clearLastRenderGraph();
             m_rg = nullptr;
+            LoadStats::get() = {};
+            const auto graph_start = std::chrono::steady_clock::now();
             try {
                 m_rg = sceneToRenderGraph(*m_scene);
 
                 if (main_handler.isGenGraphviz()) m_rg->ToGraphviz("graph.dot");
                 m_render->compileRenderGraph(*m_scene, *m_rg);
                 m_render->UpdateCameraFillMode(*m_scene, m_fillmode);
+                const auto& st = LoadStats::get();
+                LOG_INFO("render graph ready in %.0f ms (textures: %d decoded in %.0f, uploaded "
+                         "in %.0f; %d pipelines in %.0f; reflection %.0f, render targets %.0f, buffers %.0f)",
+                         std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - graph_start)
+                             .count(),
+                         st.tex_decoded,
+                         st.tex_decode_ms,
+                         st.tex_upload_ms,
+                         st.pipelines,
+                         st.pipeline_ms,
+                         st.reflect_ms,
+                         st.rt_ms,
+                         st.buf_ms);
             } catch (const std::exception& e) {
                 // nothing is drawn without a render graph
                 LOG_ERROR("build render graph failed: %s", e.what());
@@ -255,7 +274,6 @@ private:
 
 public:
     FrameTimer frame_timer;
-    FpsCounter fps_counter;
 
 private:
     std::shared_ptr<Scene> m_scene { nullptr };
@@ -272,25 +290,13 @@ private:
 
 SceneWallpaper::SceneWallpaper(): m_main_handler(std::make_shared<MainHandler>()) {}
 
-SceneWallpaper::~SceneWallpaper() {
-    /*
-    if(m_offscreen) {
-        // no wait
-        auto msg = looper::Message::create(0, m_main_handler);
-        msg->setObject("self_clean", m_main_handler);
-        msg->setCleanAfterDeliver(true);
-        m_main_handler = nullptr;
-        msg->post();
-    }
-    */
-}
+SceneWallpaper::~SceneWallpaper() {}
 
 bool SceneWallpaper::inited() const { return m_main_handler->inited(); }
 
 bool SceneWallpaper::init() { return m_main_handler->init(); }
 
 void SceneWallpaper::initVulkan(const RenderInitInfo& info) {
-    m_offscreen                             = info.offscreen;
     std::shared_ptr<RenderInitInfo> sp_info = std::make_shared<RenderInitInfo>(info);
     auto                            msg =
         CreateMsgWithCmd(m_main_handler->renderHandler(), RenderHandler::CMD::CMD_INIT_VULKAN);
@@ -426,6 +432,37 @@ MHANDLER_CMD_IMPL(MainHandler, FIRST_FRAME) {
     if (m_first_frame_callback) m_first_frame_callback();
 }
 
+// Compiled shaders are kept per scene and nothing else removes them: not
+// when a wallpaper is unsubscribed, nor when a change to the shader code makes
+// every old entry unreachable. Once per process, files not written for two
+// months are dropped. One still in use is simply compiled again.
+static void PruneShaderCache(const std::string& cache_path) {
+    namespace sfs = std::filesystem;
+    static std::once_flag once;
+    std::call_once(once, [&cache_path]() {
+        std::error_code ec;
+        const auto      limit = sfs::file_time_type::clock::now() - std::chrono::hours(24 * 60);
+        usize           removed { 0 };
+        std::vector<sfs::path> dirs;
+        for (auto it = sfs::recursive_directory_iterator(cache_path, ec);
+             ! ec && it != sfs::recursive_directory_iterator();
+             it.increment(ec)) {
+            std::error_code fec;
+            if (it->is_directory(fec)) {
+                dirs.push_back(it->path());
+            } else if (it->is_regular_file(fec) && it->last_write_time(fec) < limit && ! fec) {
+                if (sfs::remove(it->path(), fec)) removed++;
+            }
+        }
+        // deepest first; remove() only takes a directory that is empty
+        for (auto d = dirs.rbegin(); d != dirs.rend(); d++) {
+            std::error_code fec;
+            sfs::remove(*d, fec);
+        }
+        if (removed > 0) LOG_INFO("removed %d old files from the shader cache", (int)removed);
+    });
+}
+
 void MainHandler::loadScene() {
     if (m_source.empty() || m_assets.empty()) return;
 
@@ -471,6 +508,7 @@ void MainHandler::loadScene() {
             LOG_ERROR("can't load cache folder: %s", m_cache_path.c_str());
         } else {
             LOG_INFO("cache folder: %s", m_cache_path.c_str());
+            PruneShaderCache(m_cache_path);
         }
     }
 
@@ -488,6 +526,8 @@ void MainHandler::loadScene() {
             LOG_ERROR("Not supported scene type");
             return;
         }
+        LoadStats::get() = {};
+        const auto parse_start = std::chrono::steady_clock::now();
         // workshop content is not trusted, a bad scene must not take the host process down
         try {
             scene =
@@ -501,6 +541,13 @@ void MainHandler::loadScene() {
             return;
         }
         scene->vfs.swap(pVfs);
+        const auto& st = LoadStats::get();
+        LOG_INFO("scene parsed in %.0f ms (texture headers %.0f, shaders %.0f)",
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                           parse_start)
+                     .count(),
+                 st.tex_header_ms,
+                 st.shader_ms);
     }
 
     {

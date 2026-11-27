@@ -6,8 +6,6 @@ SET(BUILD_QML ON CACHE BOOL "")
 add_subdirectory(backend_scene)
 
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
 
 add_library(${PROJECT_NAME}
 	SHARED
@@ -19,7 +17,6 @@ add_library(${PROJECT_NAME}
 	WallpaperPresence.cpp
 	PluginInfo.cpp
 	FileHelper.cpp
-	qmldir
 )
 
 target_link_libraries(${PROJECT_NAME} 
@@ -63,7 +60,7 @@ install(
 )
 
 install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/qmldir
+    ${CMAKE_CURRENT_LIST_DIR}/qmldir
     DESTINATION ${KDE_INSTALL_QMLDIR}/${QMLPLUGIN_INSTALL_URI}
 )
 

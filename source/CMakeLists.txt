@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(KF_MIN_VERSION "5.68.0")
+set(KF_MIN_VERSION "6.0.0")
 
 project("WallpaperEngineKde")
 
@@ -16,8 +16,8 @@ if(NOT OpenGL_GL_PREFERENCE)
 endif()
 
 
-option(USE_PLASMAPKG "Use plasmapkg2 to install plugin to user'home"
-       ${USE_PLASMAPKG})
+option(USE_PLASMAPKG "Use kpackagetool to install the plugin package to the user's home"
+       OFF)
 
 set(DEFAULT_BUILD_TYPE "RelWithDebInfo")
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -39,14 +39,10 @@ endif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 find_package(ECM REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH} ${CMAKE_MODULE_PATH})
 
-if(ECM_VERSION_MAJOR EQUAL 6)
-  find_package(Plasma REQUIRED)
-  find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS Package)
-  include(KDEInstallDirs6)
-else()
-  find_package(KF5 ${KF_MIN_VERSION} REQUIRED COMPONENTS Package Plasma)
-  include(KDEInstallDirs)
-endif()
+# Plasma 6 / Qt 6 only; the sources no longer build against Qt 5
+find_package(Plasma REQUIRED)
+find_package(KF6 ${KF_MIN_VERSION} REQUIRED COMPONENTS Package)
+include(KDEInstallDirs6)
 
 if(NOT DEFINED QT_MAJOR_VERSION)
 message(FATAL_ERROR "Qt not found")

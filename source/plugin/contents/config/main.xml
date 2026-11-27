@@ -19,7 +19,7 @@
       <default></default>
     </entry>
     <entry name="BackgroundColor" type="String">
-      <label>Last folder used</label>
+      <label>Colour behind the wallpaper</label>
       <default>black</default>
     </entry>
     <entry name="DisplayMode" type="Int">
@@ -44,10 +44,6 @@
     </entry>
     <entry name="SortMode" type="Int">
       <label>Sort mode</label>
-      <default>0</default>
-    </entry>
-    <entry name="FilterMode" type="Int">
-      <label>Filter mode</label>
       <default>0</default>
     </entry>
     <entry name="VideoBackend" type="Int">

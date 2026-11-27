@@ -5,11 +5,6 @@ import com.github.catsout.wallpaperEngineKde 1.2
 Item {
     id: root
 
-    // Always ready (no Python startup delay)
-    readonly property bool ok: true
-    readonly property string log: ""
-    readonly property string version: "native"
-
     // Internal C++ FileHelper instance
     FileHelper {
         id: fileHelper
@@ -42,10 +37,14 @@ Item {
         return fileHelper.exists(path);
     }
 
+    // walking a wallpaper's folder is slow enough to notice when it happens on
+    // every selection; the sizes don't change while the dialog is open
+    property var _dirSizes: ({})
     function get_dir_size(path, depth) {
         if (depth === undefined) depth = 3;
-        const size = fileHelper.getDirSize(path, depth);
-        return _makePromise(size);
+        const key = `${depth}:${path}`;
+        if (!_dirSizes.hasOwnProperty(key)) _dirSizes[key] = fileHelper.getDirSize(path, depth);
+        return _makePromise(_dirSizes[key]);
     }
 
     function get_folder_list(path, opt) {

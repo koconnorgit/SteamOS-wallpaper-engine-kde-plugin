@@ -193,8 +193,9 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         .layerCount     = VK_REMAINING_MIP_LEVELS,
 
     };
-    {
-        m_desc.fb = {};
+    // one framebuffer per output image, made the first time the image comes up
+    auto fb_it = m_desc.fbs.find(m_desc.vk_present.view);
+    if (fb_it == m_desc.fbs.end()) {
         VkFramebufferCreateInfo info {
             .sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
             .pNext           = nullptr,
@@ -205,7 +206,9 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
             .height          = m_desc.vk_present.extent.height,
             .layers          = 1,
         };
-        (void)device.handle().CreateFramebuffer(info, m_desc.fb);
+        vvk::Framebuffer fb;
+        (void)device.handle().CreateFramebuffer(info, fb);
+        fb_it = m_desc.fbs.emplace(m_desc.vk_present.view, std::move(fb)).first;
     }
     {
         VkDescriptorImageInfo desc_img {
@@ -249,7 +252,7 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
         .renderPass  = *m_desc.pipeline.pass,
-        .framebuffer = *m_desc.fb,
+        .framebuffer = *fb_it->second,
         .renderArea =
             VkRect2D {
                 .offset = { 0, 0 },
@@ -301,6 +304,8 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
 }
 void FinPass::destory(const Device&, RenderingResources& rr) {
     setPrepared(false);
+    // they belong to the render pass, which the next prepare replaces
+    m_desc.fbs.clear();
     clearReleaseTexs();
     rr.vertex_buf->unallocateSubRef(m_desc.vertex_buf);
 }

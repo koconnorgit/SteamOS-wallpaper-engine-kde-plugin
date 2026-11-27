@@ -7,22 +7,14 @@
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QOpenGLContext>
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
 #include <QtOpenGL/QOpenGLFramebufferObject>
-#else
-#include <QtGui/QOpenGLFramebufferObject>
-#endif
 #include <QtGui/QOpenGLFunctions>
 #include <QtQuick/QQuickWindow>
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
 #include <QtQuick/QQuickOpenGLUtils>
-#endif
 
 #include <QtGui/QOffscreenSurface>
 #include <QtQuick/QSGSimpleTextureNode>
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
 #include <QSGTexture>
-#endif
 
 #include <clocale>
 #include <array>
@@ -33,12 +25,6 @@
 
 #if defined(__linux__) || defined(__FreeBSD__)
 //#ifdef ENABLE_X11
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-#    include <QX11Info> // IWYU pragma: keep
-#elif (QT_VERSION < QT_VERSION_CHECK(6, 5, 0))
-// Qt 6.0-6.4: use platformNativeInterface for X11 (6.0-6.1) and Wayland (6.0-6.4)
-#    include <qpa/qplatformnativeinterface.h>
-#endif
 //#endif
 #endif
 
@@ -58,7 +44,6 @@ using namespace mpv;
 
 namespace
 {
-void on_mpv_events(void* ctx) { Q_UNUSED(ctx) }
 
 void on_mpv_redraw(void* ctx);
 
@@ -82,42 +67,19 @@ int CreateMpvContex(mpv_handle* mpv, mpv_render_context** mpv_gl) {
 #if defined(__linux__) || defined(__FreeBSD__)
     if (QGuiApplication::platformName().contains("xcb")) {
         params[2].type = MPV_RENDER_PARAM_X11_DISPLAY;
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 2, 0))
         if (auto* x11App = qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
             params[2].data = x11App->display();
         }
-#elif (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-        auto* native   = QGuiApplication::platformNativeInterface();
-        params[2].data = native->nativeResourceForWindow("display", nullptr);
-#else
-        params[2].data = QX11Info::display();
-#endif
     }
     if (QGuiApplication::platformName().contains("wayland")) {
         params[2].type = MPV_RENDER_PARAM_WL_DISPLAY;
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 5, 0))
         if (auto* waylandApp = qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>()) {
             params[2].data = waylandApp->display();
         }
-#else
-        auto* native   = QGuiApplication::platformNativeInterface();
-        params[2].data = native->nativeResourceForWindow("display", nullptr);
-#endif
     }
 #endif
     int code = mpv_render_context_create(mpv_gl, mpv, params);
     return code;
-}
-
-QSGTexture* createTextureFromGl(uint32_t handle, QSize size, QQuickWindow* window) {
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-    return QNativeInterface::QSGOpenGLTexture::fromNative(handle, window, size);
-#elif (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
-    return window->createTextureFromNativeObject(
-        QQuickWindow::NativeObjectTexture, &handle, 0, size);
-#else
-    return window->createTextureFromId(handle, size);
-#endif
 }
 
 } // namespace
@@ -275,15 +237,6 @@ public slots:
         mpv_render_context_render(m_mpv_context, params);
     }
 
-    /*
-     * This function is called when a new FBO is needed.
-     * This happens on the initial frame.
-     */
-    QOpenGLFramebufferObject* createFramebufferObject(const QSize& size) override {
-        // QMetaObject::invokeMethod(m_obj, "initCallback", Qt::QueuedConnection);
-        // emit m_updater.inited();
-        return QQuickFramebufferObject::Renderer::createFramebufferObject(size);
-    }
 
     /*
      * called as a result of QQuickFramebufferObject::update()
@@ -295,32 +248,29 @@ public slots:
         MpvObject* mpv_obj = static_cast<MpvObject*>(item);
 
         if (m_mpv_context == nullptr) {
-            // mpv_set_wakeup_callback(m_mpv_handle, on_mpv_events, nullptr);
             if (m_mpv && CreateMpvContex(m_mpv, &m_mpv_context) >= 0) {
                 mpv_render_context_set_update_callback(m_mpv_context, on_mpv_redraw, this);
                 Q_EMIT this->inited();
             }
         }
 
-        if (Dirty()) {
+        // A redraw request alone is not a frame: mpv asks for one whenever a
+        // property changes too. Wait until a video frame was really rendered.
+        if (m_has_frame.load()) {
             mpv_obj->checkAndEmitFirstFrame();
         }
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
         QQuickOpenGLUtils::resetOpenGLState();
-#else
-        m_window->resetOpenGLState();
-#endif
     }
 
     void render() override {
         if (setDirty(false)) {
+            // tells what the redraw is for; has to be called before rendering
+            if (m_mpv_context &&
+                (mpv_render_context_update(m_mpv_context) & MPV_RENDER_UPDATE_FRAME))
+                m_has_frame = true;
             QOpenGLFramebufferObject* fbo = framebufferObject();
             renderFrame(fbo);
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
             QQuickOpenGLUtils::resetOpenGLState();
-#else
-            m_window->resetOpenGLState();
-#endif
         }
     }
 
@@ -332,6 +282,7 @@ private:
     std::shared_ptr<MpvHandle> m_shared_mpv { nullptr };
 
     std::atomic<bool> m_dirty { false };
+    std::atomic<bool> m_has_frame { false };
 };
 
 } // namespace mpv
@@ -376,9 +327,6 @@ void MpvObject::checkAndEmitFirstFrame() {
 }
 
 QQuickFramebufferObject::Renderer* MpvObject::createRenderer() const {
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-    window()->setPersistentOpenGLContext(true);
-#endif
     window()->setPersistentSceneGraph(true);
 
     auto* render = new MpvRender(m_shared_mpv, window());

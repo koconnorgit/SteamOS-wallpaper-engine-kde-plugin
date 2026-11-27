@@ -26,8 +26,33 @@ Flickable {
     readonly property var conf: root.schedule
     readonly property var sun: root.sunTimes
     property real now: Date.now()
-    // what the schedule shows right now (ignores manual picks and missing files)
-    readonly property var current: Sched.resolve(conf, now, sun)
+    // What the schedule shows right now (ignores manual picks and missing
+    // files), and the slots in today's order. Both are worked out again every
+    // time `now` ticks, but only replaced when the answer is a different one:
+    // a new object here re-evaluates bindings on every wallpaper card and
+    // rebuilds every row of the slot list.
+    property var current: null
+    property var slotModel: []
+    property string currentKey: ""
+    property string slotKey: ""
+    function refresh(force) {
+        const cur = Sched.resolve(conf, now, sun);
+        const ckey = cur ? `${cur.key}|${cur.nextSlotAt}|${cur.nextChangeAt}` : "none";
+        if (force || ckey !== currentKey) {
+            currentKey = ckey;
+            current = cur;
+        }
+        const slots = Sched.sortedSlots(conf, now, sun);
+        const skey = slots.map(e => `${e.slot.id}:${e.minutes}:${e.clash}`).join(',');
+        if (force || skey !== slotKey) {
+            slotKey = skey;
+            slotModel = slots;
+        }
+    }
+    onConfChanged: refresh(true)
+    onSunChanged: refresh(false)
+    onNowChanged: refresh(false)
+    Component.onCompleted: refresh(true)
     readonly property real holdUntil: root.wallpaperConfiguration
         ? (Number(root.wallpaperConfiguration.ScheduleHoldUntil) || 0) : 0
 
@@ -151,7 +176,7 @@ Flickable {
         }
 
         Repeater {
-            model: Sched.sortedSlots(schedulePage.conf, schedulePage.now, schedulePage.sun)
+            model: schedulePage.slotModel
 
             Control {
                 id: slotRow

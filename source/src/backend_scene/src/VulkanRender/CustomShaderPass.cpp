@@ -1,3 +1,4 @@
+#include "Utils/LoadStats.hpp"
 #include "CustomShaderPass.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneShader.h"
@@ -114,6 +115,10 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             auto  opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
             if (! opt.has_value()) continue;
             img_slots.slots = { opt.value() };
+        } else if (auto cached = device.tex_cache().FindTex(tex_name); cached.has_value()) {
+            // already on the gpu for an earlier pass: no need to read and
+            // decode the file again
+            img_slots = cached.value();
         } else {
             auto image = scene.imageParser->Parse(tex_name);
             if (image) {
@@ -147,6 +152,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     {
         SceneShader& shader = *(mesh.Material()->customShader.shader);
 
+        LoadStats::Timer reflect_timer(LoadStats::get().reflect_ms);
         if (! GenReflect(shader.codes, spvs, ref)) {
             LOG_ERROR("gen spv reflect failed, %s", shader.name.c_str());
             return;
@@ -203,6 +209,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     std::vector<VkVertexInputBindingDescription>   bind_descriptions;
     std::vector<VkVertexInputAttributeDescription> attr_descriptions;
     {
+        LoadStats::Timer buf_timer(LoadStats::get().buf_ms);
         m_desc.dyn_vertex = mesh.Dynamic();
         m_desc.vertex_bufs.resize(mesh.VertexCount());
 
@@ -292,6 +299,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             .addInputAttributeDescription(attr_descriptions);
         for (auto& spv : spvs) pipeline.addStage(std::move(spv));
 
+        LoadStats::Timer pipeline_timer(LoadStats::get().pipeline_ms);
+        LoadStats::get().pipelines++;
         if (! pipeline.create(device, pass, m_desc.pipeline)) return;
     }
 

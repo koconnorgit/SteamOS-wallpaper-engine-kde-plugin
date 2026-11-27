@@ -53,6 +53,7 @@ Scenes, chosen to cover different content:
 - **CPU per frame at 15 fps is noisy** (see spread below); the 240 fps figure is steadier.
 - **Frame gaps are quantised** to the monitor's refresh interval (about 17 ms on the 60 Hz monitor the window opened on). 17 ms means no frame was missed.
 - **The schedule, playlists, crossfade and settings dialog are not measured.** Nothing here covers sections S, R, B or Q, most of H, or E2, E3 and E14–E19. The test suite covers those, not this benchmark.
+- **The screen has to stay unlocked.** The window harness stalls while its window is not being drawn.
 - **The desktop keeps running.** Three live wallpapers, the compositor and a browser share the GPU during a run.
 - **It is one machine.** RTX 5070 Ti, driver 620.73.04, Ryzen 7 9800X3D, kernel 7.3.6.
 

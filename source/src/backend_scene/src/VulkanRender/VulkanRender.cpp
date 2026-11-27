@@ -1,3 +1,6 @@
+#include <array>
+#include "Utils/LoadStats.hpp"
+#include <chrono>
 #include "VulkanRender.hpp"
 
 #include "Utils/Logging.h"
@@ -56,7 +59,6 @@ struct VulkanRender::Impl {
     void drawFrame(Scene&);
 
     bool CreateRenderingResource(RenderingResources&);
-    void DestroyRenderingResource(RenderingResources&);
 
     void clearLastRenderGraph();
     void compileRenderGraph(Scene&, rg::RenderGraph&);
@@ -65,6 +67,7 @@ struct VulkanRender::Impl {
     bool initRes();
     void drawFrameSwapchain();
     void drawFrameOffscreen();
+    std::array<VkCommandBuffer, 2> recordDynUpload();
     void setRenderTargetSize(Scene&, rg::RenderGraph&);
 
     Instance                m_instance;
@@ -73,7 +76,6 @@ struct VulkanRender::Impl {
     std::unique_ptr<PrePass> m_prepass { nullptr };
     std::unique_ptr<FinPass> m_finpass { nullptr };
 
-    std::unique_ptr<FinPass> m_testpass { nullptr };
     ReDrawCB                 m_redraw_cb;
 
     std::unique_ptr<StagingBuffer> m_vertex_buf { nullptr };
@@ -204,12 +206,6 @@ bool VulkanRender::Impl::initRes() {
         m_finpass->setPresentLayout(VK_IMAGE_LAYOUT_GENERAL);
         m_finpass->setPresentQueueIndex(VK_QUEUE_FAMILY_EXTERNAL);
     }
-    /*
-    m_testpass = std::make_unique<FinPass>(FinPass::Desc{});
-    m_testpass->setPresentFormat(m_ex_swapchain->format());
-    m_testpass->setPresentQueueIndex(m_device->graphics_queue().family_index);
-    m_testpass->setPresentLayout(vk::ImageLayout::ePresentSrcKHR);
-    */
 
     m_vertex_buf = std::make_unique<StagingBuffer>(*m_device,
                                                    2 * 1024 * 1024,
@@ -281,7 +277,6 @@ bool VulkanRender::Impl::CreateRenderingResource(RenderingResources& rr) {
     return true;
 }
 
-void VulkanRender::Impl::DestroyRenderingResource(RenderingResources& rr) {}
 
 // VulkanExSwapchain* VulkanRender::exSwapchain() const { return m_ex_swapchain.get(); }
 
@@ -312,10 +307,8 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
 }
 
 void VulkanRender::Impl::drawFrameSwapchain() {
-    static size_t resource_index = 0;
 
     RenderingResources& rr = m_rendering_resources;
-    resource_index         = (resource_index + 1) % 3;
     uint32_t image_index   = 0;
     {
         VVK_CHECK_VOID_RE(m_device->handle().AcquireNextImageKHR(*m_device->swapchain().handle(),
@@ -333,13 +326,15 @@ void VulkanRender::Impl::drawFrameSwapchain() {
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_dyn_buf->recordUpload(rr.command);
+    // the passes bind the dynamic buffer; it is filled by recordDynUpload
+    m_dyn_buf->ensureGpuBuf();
     for (auto* p : m_passes) {
         if (p->prepared()) {
             p->execute(*m_device, rr);
         }
     }
     (void)rr.command.End();
+    const auto frame_cmds = recordDynUpload();
 
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo         sub_info {
@@ -348,8 +343,8 @@ void VulkanRender::Impl::drawFrameSwapchain() {
                 .waitSemaphoreCount   = 1,
                 .pWaitSemaphores      = rr.sem_swap_wait_image.address(),
                 .pWaitDstStageMask    = &wait_dst_stage,
-                .commandBufferCount   = 1,
-                .pCommandBuffers      = rr.command.address(),
+                .commandBufferCount   = (uint32_t)frame_cmds.size(),
+                .pCommandBuffers      = frame_cmds.data(),
                 .signalSemaphoreCount = 1,
                 .pSignalSemaphores    = rr.sem_swap_finish.address(),
     };
@@ -369,6 +364,21 @@ void VulkanRender::Impl::drawFrameSwapchain() {
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
 }
+// The passes write this frame's uniforms and particle vertices while they
+// record their commands. The copy of what they wrote to the gpu buffer is
+// therefore recorded afterwards, into a command buffer of its own that is
+// submitted ahead of theirs.
+std::array<VkCommandBuffer, 2> VulkanRender::Impl::recordDynUpload() {
+    (void)m_upload_cmd.Begin(VkCommandBufferBeginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    });
+    m_dyn_buf->recordUpload(m_upload_cmd);
+    (void)m_upload_cmd.End();
+    return { *m_upload_cmd.address(), *m_rendering_resources.command.address() };
+}
+
 void VulkanRender::Impl::drawFrameOffscreen() {
     RenderingResources& rr    = m_rendering_resources;
     ImageParameters     image = m_ex_swapchain->GetInprogressImage();
@@ -380,8 +390,9 @@ void VulkanRender::Impl::drawFrameOffscreen() {
         .pNext = nullptr,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
-    m_dyn_buf->recordUpload(rr.command);
 
+    // the passes bind the dynamic buffer; it is filled by recordDynUpload
+    m_dyn_buf->ensureGpuBuf();
     for (auto* p : m_passes) {
         if (p->prepared()) {
             p->execute(*m_device, rr);
@@ -389,12 +400,13 @@ void VulkanRender::Impl::drawFrameOffscreen() {
     }
 
     (void)rr.command.End();
+    const auto frame_cmds = recordDynUpload();
 
     VkSubmitInfo sub_info {
         .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .pNext              = nullptr,
-        .commandBufferCount = 1,
-        .pCommandBuffers    = rr.command.address(),
+        .commandBufferCount = (uint32_t)frame_cmds.size(),
+        .pCommandBuffers    = frame_cmds.data(),
     };
     VVK_CHECK_VOID_RE(m_device->graphics_queue().handle.Submit(sub_info, *rr.fence_frame));
 

@@ -11,9 +11,6 @@ int main(int argc, char** argv) {
     argparse::ArgumentParser program("scene-viewer");
     setAndParseArg(program, argc, argv);
 
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-    QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
-#endif
     QGuiApplication app(argc, argv);
 
     qmlRegisterType<scenebackend::SceneObject>("scenetest", 1, 0, "SceneViewer");

@@ -256,11 +256,6 @@ RowLayout {
                     visible: picViewLoader.item && picViewLoader.item.view.count === 0
                     level: 2
                     text: { 
-                        if(!(libcheck.qtwebsockets && pyext))
-                            return `Please make sure qtwebsockets(qml module) installed, and open this again`
-                        if(!pyext.ok) {
-                            return `Python helper run failed: ${pyext.log}`;
-                        }
                         if(!cfg_SteamLibraryPath)
                             return "Select your steam library through the folder selecting button above";
                         if(wpListModel.countNoFilter > 0)
@@ -372,7 +367,7 @@ RowLayout {
 
                     function setCurIndex(model) {
                         // model, ListModel
-                        new Promise((reoslve, reject) => {
+                        new Promise((resolve, reject) => {
                             for(let i=0;i < model.count;i++) {
                                 if(model.get(i).workshopid === cfg_WallpaperWorkShopId) {
                                     view.currentIndex = i;

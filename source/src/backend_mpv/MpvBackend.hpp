@@ -37,7 +37,6 @@ class MpvObject : public QQuickFramebufferObject {
     friend class MpvRender;
 
 public:
-    static void on_update(void* ctx);
 
     explicit MpvObject(QQuickItem* parent = nullptr);
     virtual ~MpvObject();

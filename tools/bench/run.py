@@ -137,7 +137,7 @@ def sample(pid):
     return s
 
 
-def run_window(plugin_dir, scenes, quick, tmp):
+def run_window(plugin_dir, scenes, quick, tmp, cycles=None):
     lib = plugin_dir / "libWallpaperEngineKde.so"
     qml = shutil.which("qml6") or shutil.which("qml")
     if not lib.exists() or not qml:
@@ -147,13 +147,13 @@ def run_window(plugin_dir, scenes, quick, tmp):
     mod.mkdir(parents=True)
     os.symlink(lib, mod / lib.name)
     shutil.copy(SOURCE / "src/qmldir", mod / "qmldir")
-    conf = {"assets": str(ASSETS), "scenes": scenes, "cycles": 6 if quick else 30, "warmup": 3,
+    conf = {"assets": str(ASSETS), "scenes": scenes, "cycles": cycles or (6 if quick else 30), "warmup": 3,
             "width": 1766, "height": 994}
     p = subprocess.Popen([qml, "-I", str(tmp / "imports"), str(Path(__file__).with_name("cycle.qml")), "--", json.dumps(conf)],
                          env=bench_env(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     res = {"cycles": conf["cycles"], "window": f'{conf["width"]}x{conf["height"]}', "samples": {}, "load_ms": [],
            "load_gap_ms": [], "drop_gap_ms": []}
-    timer = threading.Timer(600, p.kill)
+    timer = threading.Timer(600 + 2 * conf["cycles"], p.kill)
     timer.start()
     with open(tmp / "window.log", "w") as log:
         for line in p.stderr:
@@ -189,33 +189,34 @@ def report(label, env, scene_ids, headless, window):
     w(f"Commit `{env['commit']}`{' with uncommitted changes' if env['dirty'] else ''}, {env['date']}. "
       f"{env['gpu']}; {env['cpu']}; kernel {env['kernel']}. Rendered at {env['resolution']}.")
     w("")
-    w("| Scene | Cold load (ms) | Warm load (ms) | Teardown (ms) | CPU per frame, 15 fps (ms) | CPU per frame, 240 fps (ms) | GPU use at 240 fps (%) | Frames in 240 fps run |")
-    w("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-    tot = {"cold": [], "warm": [], "down": [], "c15": [], "c240": [], "gpu": []}
-    for wid, s in zip(scene_ids, headless["scenes"]):
-        if not s["ok"]:
-            w(f"| {wid} | failed to load | | | | | | |")
-            continue
-        st = {x["fps"]: x for x in s["steady"]}
-        c15 = st[15]["cpu_ms"] / max(st[15]["frames"], 1)
-        c240 = st[240]["cpu_ms"] / max(st[240]["frames"], 1)
-        gpu = st[240]["gpu_util"]
-        for k, v in (("cold", s["load_cold_ms"]), ("warm", s["load_warm_ms"]), ("down", s["teardown_ms"]),
-                     ("c15", c15), ("c240", c240), ("gpu", gpu)):
-            tot[k].append(v)
-        w(f"| {wid} | {s['load_cold_ms']:.0f} | {s['load_warm_ms']:.0f} | {s['teardown_ms']:.1f} | {c15:.3f} | {c240:.3f} | "
-          f"{gpu:.1f} | {st[240]['frames']} |")
-    if tot["cold"]:
-        m = {k: statistics.mean(v) for k, v in tot.items()}
-        w(f"| **Mean** | **{m['cold']:.0f}** | **{m['warm']:.0f}** | **{m['down']:.1f}** | **{m['c15']:.3f}** | **{m['c240']:.3f}** | "
-          f"**{m['gpu']:.1f}** | |")
-    w("")
-    c = headless["cycles"]
-    n = c["count"]
-    w(f"Headless create/destroy, {n} cycles: {(c['fds_after'] - c['fds_before']) / n:+.2f} file descriptors, "
-      f"{(c['rss_kb_after'] - c['rss_kb_before']) / n / 1024:+.2f} MB resident memory and "
-      f"{(c['threads_after'] - c['threads_before']) / n:+.2f} threads per cycle; {c['total_ms'] / n:.0f} ms per cycle.")
-    w("")
+    if headless:
+        w("| Scene | Cold load (ms) | Warm load (ms) | Teardown (ms) | CPU per frame, 15 fps (ms) | CPU per frame, 240 fps (ms) | GPU use at 240 fps (%) | Frames in 240 fps run |")
+        w("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        tot = {"cold": [], "warm": [], "down": [], "c15": [], "c240": [], "gpu": []}
+        for wid, s in zip(scene_ids, headless["scenes"]):
+            if not s["ok"]:
+                w(f"| {wid} | failed to load | | | | | | |")
+                continue
+            st = {x["fps"]: x for x in s["steady"]}
+            c15 = st[15]["cpu_ms"] / max(st[15]["frames"], 1)
+            c240 = st[240]["cpu_ms"] / max(st[240]["frames"], 1)
+            gpu = st[240]["gpu_util"]
+            for k, v in (("cold", s["load_cold_ms"]), ("warm", s["load_warm_ms"]), ("down", s["teardown_ms"]),
+                         ("c15", c15), ("c240", c240), ("gpu", gpu)):
+                tot[k].append(v)
+            w(f"| {wid} | {s['load_cold_ms']:.0f} | {s['load_warm_ms']:.0f} | {s['teardown_ms']:.1f} | {c15:.3f} | {c240:.3f} | "
+              f"{gpu:.1f} | {st[240]['frames']} |")
+        if tot["cold"]:
+            m = {k: statistics.mean(v) for k, v in tot.items()}
+            w(f"| **Mean** | **{m['cold']:.0f}** | **{m['warm']:.0f}** | **{m['down']:.1f}** | **{m['c15']:.3f}** | **{m['c240']:.3f}** | "
+              f"**{m['gpu']:.1f}** | |")
+        w("")
+        c = headless["cycles"]
+        n = c["count"]
+        w(f"Headless create/destroy, {n} cycles: {(c['fds_after'] - c['fds_before']) / n:+.2f} file descriptors, "
+          f"{(c['rss_kb_after'] - c['rss_kb_before']) / n / 1024:+.2f} MB resident memory and "
+          f"{(c['threads_after'] - c['threads_before']) / n:+.2f} threads per cycle; {c['total_ms'] / n:.0f} ms per cycle.")
+        w("")
     if "skipped" in window:
         w(f"Window harness skipped: {window['skipped']}.")
     else:
@@ -244,6 +245,8 @@ def main():
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--res", default="3840x2160")
     ap.add_argument("--no-window", action="store_true", help="skip the window harness")
+    ap.add_argument("--no-headless", action="store_true", help="skip the headless harness")
+    ap.add_argument("--cycles", type=int, help="create/destroy cycles in the window harness (default 30)")
     ap.add_argument("--scenes", nargs="*", help="workshop ids to use instead of the built-in set")
     args = ap.parse_args()
 
@@ -257,18 +260,20 @@ def main():
     env = environment(args.res)
     with tempfile.TemporaryDirectory(prefix="wek-bench-") as t:
         tmp = Path(t)
-        print("headless harness ...", flush=True)
-        headless = run_headless(exe, scenes, args.res, args.quick, tmp)
+        headless = None
+        if not args.no_headless:
+            print("headless harness ...", flush=True)
+            headless = run_headless(exe, scenes, args.res, args.quick, tmp)
         window = {"skipped": "--no-window"} if args.no_window else None
         if window is None:
             print("window harness ...", flush=True)
-            window = run_window(plugin_dir, scenes, args.quick, tmp)
+            window = run_window(plugin_dir, scenes, args.quick, tmp, args.cycles)
         logs = SOURCE / "build-bench/logs"
         logs.mkdir(parents=True, exist_ok=True)
         for name in ("headless.log", "window.log"):
             if (tmp / name).exists():
                 shutil.copy(tmp / name, logs / f"{args.label}.{name}")
-    for wid, s in zip(ids, headless["scenes"]):
+    for wid, s in zip(ids, headless["scenes"] if headless else []):
         s["scene"] = wid
     out = REPO / "docs/benchmarks"
     out.mkdir(parents=True, exist_ok=True)

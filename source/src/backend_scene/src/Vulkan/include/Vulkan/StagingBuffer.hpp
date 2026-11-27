@@ -1,4 +1,6 @@
 #pragma once
+#include <utility>
+#include <vector>
 #include "Core/NoCopyMove.hpp"
 #include "Instance.hpp"
 #include "Parameters.hpp"
@@ -38,6 +40,9 @@ public:
     bool writeToBuf(const StagingBufferRef&, std::span<uint8_t>, size_t offset = 0);
     bool fillBuf(const StagingBufferRef& ref, size_t offset, size_t size, uint8_t c);
 
+    // Makes sure gpuBuf() is valid. Call before recording commands that bind
+    // it, when recordUpload comes after them.
+    bool ensureGpuBuf();
     bool recordUpload(vvk::CommandBuffer&);
 
     VkBuffer gpuBuf() const;
@@ -54,6 +59,7 @@ private:
     VkResult      mapStageBuf();
     VirtualBlock* newVirtualBlock(VkDeviceSize);
     bool          increaseBuf(VkDeviceSize);
+    void          markDirty(VkDeviceSize begin, VkDeviceSize end);
 
     const Device& m_device;
     VkDeviceSize  m_size_step;
@@ -65,6 +71,12 @@ private:
 
     VmaBufferParameters m_stage_buf;
     VmaBufferParameters m_gpu_buf;
+
+    // Written since the last upload, as [begin, end) ranges. Only these are
+    // copied to the gpu buffer.
+    std::vector<std::pair<VkDeviceSize, VkDeviceSize>> m_dirty;
+    // the gpu buffer is new and needs everything
+    bool m_upload_all { false };
 };
 
 } // namespace vulkan

@@ -53,7 +53,6 @@ private:
 private:
     friend class MainHandler;
 
-    bool                         m_offscreen { false };
     std::shared_ptr<MainHandler> m_main_handler;
 };
 } // namespace wallpaper

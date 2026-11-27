@@ -16,11 +16,11 @@ How to read an item:
 | S. Schedule, playlists and crossfade | 16 | 0 |
 | H. Hardening against bad workshop content | 21 | 0 |
 | T. Follow-ups to the TEXB0004 / effects fix | 4 | 0 |
-| E. Efficiency | 22 | 22 |
-| R. Redundancy and dead code | 14 | 14 |
-| B. Build | 8 | 8 |
+| E. Efficiency | 22 | 4 |
+| R. Redundancy and dead code | 14 | 6 |
+| B. Build | 8 | 3 |
 | Q. Tests | 5 | 1 |
-| N. Found while fixing | 3 | 3 |
+| N. Found while fixing | 4 | 4 |
 
 ## A. Leaks and crashes in normal use
 
@@ -131,62 +131,87 @@ Notes on individual fixes:
 
 ## N. Found while fixing
 
-- [ ] **N1. Video textures are not supported.** `B/src/WPTexImageParser.cpp`. Some scenes store an mp4 as a texture (flag 32 in the TEXI header, `ftyp` at the start of the data). 3826449546 "A cup of autumn" and 3051401409 "Witch's Cauldron" have one. They used to be uploaded as if they were pixels, which lost the gpu device on the first of the two; now the layer is skipped with a clear message and the rest of the scene renders. Playing them needs a video decoder feeding a texture, which is a feature, not a fix.
+- [ ] **N1. Video textures are not supported.** `B/src/WPTexImageParser.cpp`. Some scenes store an mp4 as a texture (flag 32 in the TEXI header, `ftyp` at the start of the data). Three installed wallpapers have one, among them 3826449546 "A cup of autumn" and 3051401409 "Witch's Cauldron". They used to be uploaded as if they were pixels, which lost the gpu device on the first of the two; now the layer is skipped with a clear message and the rest of the scene renders. Playing them needs a video decoder feeding a texture, which is a feature, not a fix.
 - [ ] **N2. Resident memory grows 7–9 MB per wallpaper switch in the Qt path.** Seen in the benchmark's window harness and not explained by A1 (GPU memory no longer grows). Not present headless. Needs a heap profile of the window harness.
 - [ ] **N3. Effect fbos without the `_rt_` prefix are looked up as files.** For example `_downscaled1` and `_coc` in a depth-of-field effect log `not found "/assets/materials/_downscaled1_….tex"`. The effect's passes then sample the fallback texture, so the effect is missing. Present before this work.
+- [ ] **N4. The window benchmark and the QML harness stall while the screen is locked.** Qt stops driving timers for a window that is not being drawn. A 120-cycle run sat for ten minutes that way. Not a bug in the plugin; the tools should detect it and say so.
 
 ## E. Efficiency
 
 Measured effect is tracked in [benchmark.md](benchmark.md) where the benchmark covers the item.
 
-- [ ] **E1. Scene teardown blocks the Qt render thread.** `B/qml_helper/SceneBackend.cpp:93-103,176`, `B/src/SceneWallpaper.cpp:139-143`. 50–85 ms per dropped wallpaper in the journal. Fix: release the last reference on a worker thread.
+Eighteen of the 22 closed on 27 November 2026. The work started from a profile, which changed the priorities: the renderer now logs where each load spends its time (`scene parsed in … ms`, `render graph ready in … ms`), and the first readings showed three costs the review had ranked low or missed.
+
+- **The vertex staging buffer, not in the review at all.** `B/src/Vulkan/StagingBuffer.cpp` grew in fixed 2 MB steps and, on every growth, read its whole contents back out of mapped (write-combined) memory, twice. A wallpaper with several particle systems grew it 19 times; that alone was 1.0–1.3 s of a 1.7 s load. It now asks for cached memory, grows by half of its size, and copies once. Fixed together with E6.
+- **E6 was bigger than described.** The same buffer, 30–50 MB for particle-heavy scenes, was copied to the GPU in full on every frame. It now tracks what was written and copies only that. To make that possible the copy is recorded after the passes have written their data, into a command buffer submitted ahead of theirs.
+- **E12/E13.** Preparing shaders cost 250–450 ms per load even with every shader cached on disk, because the work to compute the cache key (glslang preprocessing and several regex passes) was repeated for each of a scene's materials. Results are now remembered in the process by a hash of the inputs, so a scene's repeated materials, and the same scene on another monitor, cost nothing.
+- **E10.** One wallpaper decoded its textures 99 times for 58 distinct ones.
+
+Closed as not needed, with the measurement:
+
+- **E8** (pipeline cache): creating all of a scene's pipelines takes 1–4 ms.
+- **E9** (batched texture upload): 4–50 ms per scene.
+- **E11** (texture header cache): 0–1 ms per scene.
+
+Still open: E2 (file I/O on the GUI thread; E3 and a folder-size cache take the edge off, the real fix is a worker thread), E7 (stop drawing static scenes), E16 and E17 (small repeated reads).
+
+How it was checked: all 120 scene wallpapers load as before (the sum of their load times fell from 49.8 s to 34.5 s at 1080p); the benchmark scenes render the same; `tools/qmltest` passes its three scenarios, including a new one that mixes scene, mpv, web and QtMultimedia wallpapers (E19). E5 changes what shaders that sample low mip levels of the frame buffer see; none of the installed wallpapers reference that buffer by name, so its visual effect is unchecked.
+
+- [x] **E1. Scene teardown blocks the Qt render thread.** `B/qml_helper/SceneBackend.cpp:93-103,176`, `B/src/SceneWallpaper.cpp:139-143`. 50–85 ms per dropped wallpaper in the journal. Fix: release the last reference on a worker thread.
 - [ ] **E2. File I/O on the GUI thread behind a fake promise.** `src/FileHelper.cpp:36-146`, `ui/Pyext.qml:19-55`. `ui/WallpaperListModel.qml:218` reads every `project.json` when the dialog opens; `ui/page/WallpaperPage.qml:536` sizes a directory inside a binding. Fix: one batched worker-thread scan, cached sizes.
-- [ ] **E3. Settings page is instantiated twice per open.** `ui/WallpaperListModel.qml:168-194,240-258`, `ui/config.qml:261-281`. Plasma creates a throwaway instance; each runs the full scan. Fix: defer the scan until visible.
-- [ ] **E4. Framebuffer created and destroyed every frame** (checked). `B/src/VulkanRender/FinPass.cpp:197-208`. Fix: one per output image. `FinPass::prepare` also recompiles its two fixed shaders on every load (`:104-116`).
-- [ ] **E5. Mip chain regenerated every frame, sampler capped at LOD 1** (checked the cap). `B/src/Vulkan/TextureCache.cpp:76`, `B/src/VulkanRender/VulkanRender.cpp:430-434`, `CopyPass.cpp:152`. Fix: `maxLod = mipmap_level`.
-- [ ] **E6. Whole dynamic buffer re-uploaded every frame.** `B/src/Vulkan/StagingBuffer.cpp:232-248`, `B/src/VulkanRender/VulkanRender.cpp:383`. Fix: persistent mapping, dirty range only.
+- [x] **E3. Settings page is instantiated twice per open.** `ui/WallpaperListModel.qml:168-194,240-258`, `ui/config.qml:261-281`. Plasma creates a throwaway instance; each runs the full scan. Fix: defer the scan until visible.
+- [x] **E4. Framebuffer created and destroyed every frame** (checked). `B/src/VulkanRender/FinPass.cpp:197-208`. Fix: one per output image. `FinPass::prepare` also recompiles its two fixed shaders on every load (`:104-116`).
+- [x] **E5. Mip chain regenerated every frame, sampler capped at LOD 1** (checked the cap). `B/src/Vulkan/TextureCache.cpp:76`, `B/src/VulkanRender/VulkanRender.cpp:430-434`, `CopyPass.cpp:152`. Fix: `maxLod = mipmap_level`.
+- [x] **E6. Whole dynamic buffer re-uploaded every frame.** `B/src/Vulkan/StagingBuffer.cpp:232-248`, `B/src/VulkanRender/VulkanRender.cpp:383`. Fix: persistent mapping, dirty range only.
 - [ ] **E7. Every pass re-executes every frame.** `B/src/VulkanRender/CustomShaderPass.cpp:400-402,416,439-457`, `VulkanRender.cpp:385-389`. A fully static scene still renders at the configured fps. Fix: stop drawing after the first frame when nothing is time-dependent; drop the per-pass heap allocation and no-op barrier.
-- [ ] **E8. One Vulkan instance and device per wallpaper, no pipeline cache.** `B/src/VulkanRender/VulkanRender.cpp:145-174,214-224`, `B/src/Vulkan/GraphicsPipeline.cpp:240`. Fix (small): a serialised `VkPipelineCache`. Sharing a device is a large refactor.
-- [ ] **E9. Texture upload: one submit and `vkDeviceWaitIdle` per slot.** `B/src/Vulkan/TextureCache.cpp:472-498`. Staging results are unchecked. Fix: one command buffer, one fence.
-- [ ] **E10. Textures decoded once per pass.** `B/src/VulkanRender/CustomShaderPass.cpp:118-120`, `B/src/Vulkan/TextureCache.cpp:420-423`, `B/src/WPTexImageParser.cpp:232-235`. The decode happens before the cache lookup. Fix: check the cache first; move the buffer instead of copying.
-- [ ] **E11. `ParseHeader` is uncached.** `B/src/WPSceneParser.cpp:289,355`, `B/src/WPTexImageParser.cpp:244-336`, `B/src/WPPkgFs.cpp:53`. Every material re-opens the pkg per texture. Fix: a header map in the parser.
-- [ ] **E12. `std::regex` built on every call.** `B/src/WPShaderParser.cpp:239,249,288,308,320,341,349,354,373,394,396,416`, `B/src/WPSceneParser.cpp:233`. About 13 per material, several even on a cache hit. Fix: `static const`, plain string operations for literals.
-- [ ] **E13. Shader sources and JSON re-read and re-copied per object.** `B/src/WPSceneParser.cpp:270-306`, `B/src/WPJson.cpp:46,64`. Fix: per-parse source and SPIR-V maps; return references from `ResolveUserProperty`.
-- [ ] **E14. Shader cache is never pruned and not shared between scenes.** `B/src/WPShaderParser.cpp:22,421-431`. `~/.cache/wescene-renderer/<id>/spvs01/`. Fix: prune old `spvsNN` directories and entries for unsubscribed ids.
-- [ ] **E15. Schedule tab's 20 s timer rebuilds too much.** `ui/page/SchedulePage.qml:28-41,154`, `ui/config.qml:215-245`, `ui/page/WallpaperPage.qml:334-336`. All slot rows are recreated and three bindings per grid card re-evaluate. Fix: expose key and wid as strings.
+- [x] **E8. One Vulkan instance and device per wallpaper, no pipeline cache.** `B/src/VulkanRender/VulkanRender.cpp:145-174,214-224`, `B/src/Vulkan/GraphicsPipeline.cpp:240`. Fix (small): a serialised `VkPipelineCache`. Sharing a device is a large refactor.
+- [x] **E9. Texture upload: one submit and `vkDeviceWaitIdle` per slot.** `B/src/Vulkan/TextureCache.cpp:472-498`. Staging results are unchecked. Fix: one command buffer, one fence.
+- [x] **E10. Textures decoded once per pass.** `B/src/VulkanRender/CustomShaderPass.cpp:118-120`, `B/src/Vulkan/TextureCache.cpp:420-423`, `B/src/WPTexImageParser.cpp:232-235`. The decode happens before the cache lookup. Fix: check the cache first; move the buffer instead of copying.
+- [x] **E11. `ParseHeader` is uncached.** `B/src/WPSceneParser.cpp:289,355`, `B/src/WPTexImageParser.cpp:244-336`, `B/src/WPPkgFs.cpp:53`. Every material re-opens the pkg per texture. Fix: a header map in the parser.
+- [x] **E12. `std::regex` built on every call.** `B/src/WPShaderParser.cpp:239,249,288,308,320,341,349,354,373,394,396,416`, `B/src/WPSceneParser.cpp:233`. About 13 per material, several even on a cache hit. Fix: `static const`, plain string operations for literals.
+- [x] **E13. Shader sources and JSON re-read and re-copied per object.** `B/src/WPSceneParser.cpp:270-306`, `B/src/WPJson.cpp:46,64`. Fix: per-parse source and SPIR-V maps; return references from `ResolveUserProperty`.
+- [x] **E14. Shader cache is never pruned and not shared between scenes.** `B/src/WPShaderParser.cpp:22,421-431`. `~/.cache/wescene-renderer/<id>/spvs01/`. Fix: prune old `spvsNN` directories and entries for unsubscribed ids.
+- [x] **E15. Schedule tab's 20 s timer rebuilds too much.** `ui/page/SchedulePage.qml:28-41,154`, `ui/config.qml:215-245`, `ui/page/WallpaperPage.qml:334-336`. All slot rows are recreated and three bindings per grid card re-evaluate. Fix: expose key and wid as strings.
 - [ ] **E16. Each monitor stats every playlist item once a minute.** `ui/main.qml:154-157,175,205-206,229`. Fix: cache availability.
 - [ ] **E17. Repeated reads on selection and at start.** `ui/page/WallpaperPage.qml:536,680-695,882,928-935,1105`, `ui/main.qml:33,81,307,593,607`.
-- [ ] **E18. Render size is truncated, not rounded.** `B/qml_helper/SceneBackend.cpp:206-210,219`. 3839×2160 and 2560×1439 with fractional scaling, so every frame is resampled; the size is also fixed at first paint. Fix: `qRound`, and resize or recreate on geometry change.
-- [ ] **E19. mpv first-frame signal can fire before a frame exists.** `src/backend_mpv/MpvBackend.cpp:230,303-305,339-343`. Fix: emit after `MPV_RENDER_UPDATE_FRAME`. `play()`/`pause()` also cost two synchronous property reads each (`:166-189`).
-- [ ] **E20. `getDirSize` has a dead first pass.** `src/FileHelper.cpp:64-78`. One wasted directory scan per call.
-- [ ] **E21. GL error checks attribute stale errors.** `B/qml_helper/glExtra.cpp:31-36,140-158`. `GL_INVALID_ENUM at genExTexture` is logged about once per scene start; the cause is undetermined. Fix: drain errors on entry, return 0 on a failed import.
-- [ ] **E22. Constant shader values loaded twice per image** (checked). `B/src/WPSceneParser.cpp:638,641-660`. The second block repeats the first, including its log lines.
+- [x] **E18. Render size is truncated, not rounded.** `B/qml_helper/SceneBackend.cpp:206-210,219`. 3839×2160 and 2560×1439 with fractional scaling, so every frame is resampled; the size is also fixed at first paint. Fix: `qRound`, and resize or recreate on geometry change.
+- [x] **E19. mpv first-frame signal can fire before a frame exists.** `src/backend_mpv/MpvBackend.cpp:230,303-305,339-343`. Fix: emit after `MPV_RENDER_UPDATE_FRAME`. `play()`/`pause()` also cost two synchronous property reads each (`:166-189`).
+- [x] **E20. `getDirSize` has a dead first pass.** `src/FileHelper.cpp:64-78`. One wasted directory scan per call.
+- [x] **E21. GL error checks attribute stale errors.** `B/qml_helper/glExtra.cpp:31-36,140-158`. `GL_INVALID_ENUM at genExTexture` is logged about once per scene start; the cause is undetermined. Fix: drain errors on entry, return 0 on a failed import.
+- [x] **E22. Constant shader values loaded twice per image** (checked). `B/src/WPSceneParser.cpp:638,641-660`. The second block repeats the first, including its log lines.
 
 ## R. Redundancy and dead code
 
-- [ ] **R1. Python-helper leftovers.** `ui/Pyext.qml` (name, fake `ok`/`log`/`version`, no-op `.catch`), `ui/page/WallpaperPage.qml:259-263`, `ui/config.qml:76-77`, `ui/Common.qml:299-305`.
-- [ ] **R2. Qt 5 / KF5 branches that cannot build.** `QT_VERSION < 6` code in `src/backend_mpv/MpvBackend.cpp`, `B/qml_helper/SceneBackend.cpp`, `src/MouseGrabber.cpp:48-81`.
-- [ ] **R3. Scene wrapper.** `B/qml_helper/SceneBackend.cpp/.hpp`: `m_eatFrameOp`, signals `textureInUse` and `nodeDestroyed`, `emitSceneFirstFrame()`, `resizeFb()`, `m_inited`, undefined `on_update`, `GlExtra::impl::test`.
+Eight of 14 closed on 27 November 2026; everything removed was compile-checked and the QML linted. Notes on what is left:
+
+- **R4, R7, R9** are partly done: the undefined declarations, unused helpers, `m_testpass`, `fps_counter`, `m_offscreen` and the commented-out blocks next to code that was being changed are gone. The unused public API of the mpv item, the pass cache/dirty API and the large commented block in `Shader.cpp` remain.
+- **R5, R8, R10** are untouched.
+
+- [x] **R1. Python-helper leftovers.** `ui/Pyext.qml` (name, fake `ok`/`log`/`version`, no-op `.catch`), `ui/page/WallpaperPage.qml:259-263`, `ui/config.qml:76-77`, `ui/Common.qml:299-305`.
+- [x] **R2. Qt 5 / KF5 branches that cannot build.** `QT_VERSION < 6` code in `src/backend_mpv/MpvBackend.cpp`, `B/qml_helper/SceneBackend.cpp`, `src/MouseGrabber.cpp:48-81`.
+- [x] **R3. Scene wrapper.** `B/qml_helper/SceneBackend.cpp/.hpp`: `m_eatFrameOp`, signals `textureInUse` and `nodeDestroyed`, `emitSceneFirstFrame()`, `resizeFb()`, `m_inited`, undefined `on_update`, `GlExtra::impl::test`.
 - [ ] **R4. mpv wrapper.** (Also from H21: nothing drains the client event queue; with `loop=inf` it fills and mpv drops events. Drain it or disable the events.) `src/backend_mpv/MpvBackend.hpp/.cpp`: `statusChanged` never emitted; `status`, `logfile`, `initFinished`, `stop`, `getProperty` unused from QML; undefined `on_update`; unused `createTextureFromGl`, `on_mpv_events`, `createFramebufferObject`, `m_window`; unused includes.
 - [ ] **R5. Small helper classes.** `src/MouseGrabber.hpp:14,27` (`forceCapture`, `sendEvent`), `src/PluginInfo.hpp:10-11,19` (wrong type, signals never emitted), `src/SunSchedule.hpp:15` and `src/TTYSwitchMonitor.hpp:7` (`QQuickItem` where `QObject` would do), `src/qmldir:3-6` (stale `classname` lines), `src/plugin.cpp:22,26` (missing includes).
-- [ ] **R6. Renderer files in no target.** `B/src/Core/BlockingQueue.hpp` (would not compile), `B/src/Utils/FrameTimer.cpp` and its header.
+- [x] **R6. Renderer files in no target.** `B/src/Core/BlockingQueue.hpp` (would not compile), `B/src/Utils/FrameTimer.cpp` and its header.
 - [ ] **R7. Unused renderer members and API.** `fps_counter` (`B/src/SceneWallpaper.cpp:241`); `m_testpass`, `DestroyRenderingResource`, `resource_index` (`B/src/VulkanRender/VulkanRender.cpp:76,284,315`); the cache/dirty API in `CustomShaderPass.hpp:61-74` and `VulkanPass.hpp:40-45`; `GraphicsPipeline::setRenderPass/getShaderSpv/setLogicOp`; `Device::GetUsage`; `Looper::unregisterHandler`; `Message::countEntries/getEntryAt`; `FinPass::Desc::render_layout`; `SceneWallpaper::m_offscreen`.
 - [ ] **R8. Unused parser code.** `ImageHeader::mipmap_pow2`; unreachable block at `B/src/WPParticleParser.cpp:589-602`; `GenRopeParticleData` (`B/src/Particle/WPParticleRawGener.cpp:99-206`); `SoundManager::Test`; `WPSoundStream::Config::maxtime/mintime/mode` (parsed, unused, so "random" plays as loop); assorted unused parameters and locals.
 - [ ] **R9. Commented-out blocks.** `B/src/Vulkan/Shader.cpp:246-314` (and `ToVkType` at `:463` used only by it), `B/src/WPShaderParser.cpp:113-117,356-358`, `B/src/WPSceneParser.cpp:225-229,403-406`, `B/src/WPPuppet.cpp:22-28`, `B/src/SceneWallpaper.cpp:259-268`.
 - [ ] **R10. Duplicated logic.** `B/src/wpscene/WPMaterial.cpp:12-28` vs `:30-46`, and `:49-74` vs `:101-126`; the mip-header walk in `Parse` and `ParseHeader` (`B/src/WPTexImageParser.cpp:175-194,261-277`), which already disagree on the power-of-two test.
-- [ ] **R11. Unused config and QML properties.** `plugin/contents/config/main.xml:49-52` (`FilterMode`), `:21-24` (`BackgroundColor` mislabelled, no UI); `ui/main.qml:18` (`filterStr`), `:280-284` (`onBackendFirstFrame` never connected).
-- [ ] **R12. Stale QML module entries.** `ui/qmldir` (`WindowListModel` points at a missing file); `ui/Theme.qml` has no users.
-- [ ] **R13. Unused or broken QML/JS helpers.** `ui/js/utils.mjs:1-23,40-46`; `ui/Common.qml` (`cbValueOfIndex`, `getWpModelFileSource`, `genItemListStr`, `listProperty`, stale comment at `:93-96`); `ui/WallpaperListModel.qml:47,230,252-256`; `ui/page/WallpaperPage.qml:375,389` (`reoslve` typo, throws inside the promise); `ui/js/schedule.mjs` (`res.index`, internal-only exports, unchecked `version`).
-- [ ] **R14. Viewer-only code.** `drawFrameSwapchain`, `B/src/Vulkan/Swapchain.cpp` and the surface path are used only by the standalone viewer. Keep, but note.
+- [x] **R11. Unused config and QML properties.** `plugin/contents/config/main.xml:49-52` (`FilterMode`), `:21-24` (`BackgroundColor` mislabelled, no UI); `ui/main.qml:18` (`filterStr`), `:280-284` (`onBackendFirstFrame` never connected).
+- [x] **R12. Stale QML module entries.** `ui/qmldir` (`WindowListModel` points at a missing file); `ui/Theme.qml` has no users.
+- [x] **R13. Unused or broken QML/JS helpers.** `ui/js/utils.mjs:1-23,40-46`; `ui/Common.qml` (`cbValueOfIndex`, `getWpModelFileSource`, `genItemListStr`, `listProperty`, stale comment at `:93-96`); `ui/WallpaperListModel.qml:47,230,252-256`; `ui/page/WallpaperPage.qml:375,389` (`reoslve` typo, throws inside the promise); `ui/js/schedule.mjs` (`res.index`, internal-only exports, unchecked `version`).
+- [x] **R14. Viewer-only code.** `drawFrameSwapchain`, `B/src/Vulkan/Swapchain.cpp` and the surface path are used only by the standalone viewer. Keep, but note.
 
 ## B. Build
 
-- [ ] **B1.** `src/backend_mpv/CMakeLists.txt:7,23`: links `${MPV_LIBRARIES}` with no include or library dirs. Use `PkgConfig::MPV`.
-- [ ] **B2.** `src/backend_mpv/CMakeLists.txt:4,18-22`: private Gui include dirs no longer needed; `Qt::Quick` linked `PRIVATE` though public headers use it; `Qt::OpenGL` only transitive.
-- [ ] **B3.** `src/CMakeLists.txt:1`, `src/backend_mpv/CMakeLists.txt:3`, `CMakeLists.txt:42-49`: hard Qt6 in one place, `Qt${QT_MAJOR_VERSION}` and a KF5 branch elsewhere.
-- [ ] **B4.** `src/CMakeLists.txt:50-67,21,8-10`: `qmldir` copied to one directory and installed from another; listed as a library source; `AUTORCC`/`AUTOUIC` with nothing to process.
+Five of 8 closed on 27 November 2026 (checked by a clean configure, a build and a staged install). Open: B5, B7 (the default build type and LTO), B8.
+
+- [x] **B1.** `src/backend_mpv/CMakeLists.txt:7,23`: links `${MPV_LIBRARIES}` with no include or library dirs. Use `PkgConfig::MPV`.
+- [x] **B2.** `src/backend_mpv/CMakeLists.txt:4,18-22`: private Gui include dirs no longer needed; `Qt::Quick` linked `PRIVATE` though public headers use it; `Qt::OpenGL` only transitive.
+- [x] **B3.** `src/CMakeLists.txt:1`, `src/backend_mpv/CMakeLists.txt:3`, `CMakeLists.txt:42-49`: hard Qt6 in one place, `Qt${QT_MAJOR_VERSION}` and a KF5 branch elsewhere.
+- [x] **B4.** `src/CMakeLists.txt:50-67,21,8-10`: `qmldir` copied to one directory and installed from another; listed as a library source; `AUTORCC`/`AUTOUIC` with nothing to process.
 - [ ] **B5.** `src/backend_mpv/standalone_viewer/CMakeLists.txt`: orphaned from the main build.
-- [ ] **B6.** `CMakeLists.txt:7,19-20`: `USE_PLASMAPKG` defaults to its own undefined value; `KF_MIN_VERSION 5.68.0` applied to the KF6 lookup.
+- [x] **B6.** `CMakeLists.txt:7,19-20`: `USE_PLASMAPKG` defaults to its own undefined value; `KF_MIN_VERSION 5.68.0` applied to the KF6 lookup.
 - [ ] **B7.** `CMakeLists.txt:23`: default is RelWithDebInfo while `CLAUDE.md` documents Release; no LTO although everything links into one `.so`.
 - [ ] **B8.** `B/src/CMakeLists.txt:17-19`: `-Wno-unused-variable` hides leftovers (for example `B/src/Vulkan/Instance.cpp:92`).
 

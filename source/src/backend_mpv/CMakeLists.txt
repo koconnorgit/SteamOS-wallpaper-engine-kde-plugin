@@ -1,25 +1,26 @@
 project(mpvbackend)
 
-find_package(Qt${QT_MAJOR_VERSION} COMPONENTS Gui Quick REQUIRED)
-include_directories(${Qt${QT_MAJOR_VERSION}Gui_PRIVATE_INCLUDE_DIRS})
+find_package(Qt6 COMPONENTS Gui Quick OpenGL REQUIRED)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(MPV REQUIRED mpv)
+# an imported target carries mpv's include and library directories, for
+# installs outside the default paths
+pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
 
-set(CMAKE_AUTOMOC ON) 
-set(CMAKE_AUTORCC ON) 
-set(CMAKE_AUTOUIC ON) 
+set(CMAKE_AUTOMOC ON)
 
 add_library(${PROJECT_NAME}
 	STATIC
-	MpvBackend.cpp  
+	MpvBackend.cpp
 	qthelper.hpp
 )
-target_link_libraries(${PROJECT_NAME} 
-	PRIVATE 
-    Qt::Quick
+target_link_libraries(${PROJECT_NAME}
+	PUBLIC
+	# the public header uses QtQuick types
+	Qt::Quick
+	PRIVATE
 	Qt::Gui
-	# Qt::X11Extras
-	${MPV_LIBRARIES}
+	Qt::OpenGL
+	PkgConfig::MPV
 )
-target_include_directories(${PROJECT_NAME} PUBLIC .) #${INCLUDE_DIRECTORIES})
+target_include_directories(${PROJECT_NAME} PUBLIC .)

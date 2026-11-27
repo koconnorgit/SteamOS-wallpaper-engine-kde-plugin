@@ -68,7 +68,6 @@ protected:
     void hoverMoveEvent(QHoverEvent* event) override;
 
 public slots:
-    void resizeFb();
     void play();
     void pause();
 
@@ -93,7 +92,6 @@ private:
     QString m_userProperties;
 
 public:
-    static void on_update(void* ctx);
 
     explicit SceneObject(QQuickItem* parent = nullptr);
     virtual ~SceneObject();
@@ -101,7 +99,6 @@ public:
 private:
     void setScenePropertyQurl(std::string_view, QUrl);
     void resetScene();
-    bool m_inited { false };
     // a paint node was created before; a second one needs a new renderer
     bool m_had_node { false };
     bool m_paused { false };

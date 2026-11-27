@@ -46,6 +46,8 @@ public:
     std::optional<ExImageParameters> CreateExTex(uint32_t witdh, uint32_t height, VkFormat,
                                                  VkImageTiling);
     ImageSlotsRef                    CreateTex(Image&);
+    // the texture made from the image with this key, if there is one already
+    std::optional<ImageSlotsRef>     FindTex(const std::string& key);
     // 1x1 transparent black, for samplers that have nothing else to show
     ImageSlotsRef                    FallbackTex();
 

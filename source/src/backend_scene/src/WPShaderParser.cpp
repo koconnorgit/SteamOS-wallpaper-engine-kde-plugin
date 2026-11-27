@@ -2,6 +2,7 @@
 
 #include "Fs/IBinaryStream.h"
 #include "Utils/Logging.h"
+#include "Utils/LoadStats.hpp"
 #include "WPJson.hpp"
 
 #include "wpscene/WPUniform.h"
@@ -20,6 +21,8 @@
 #include <limits>
 #include <thread>
 #include <functional>
+#include <mutex>
+#include <unordered_map>
 
 static constexpr std::string_view SHADER_PLACEHOLD { "__SHADER_PLACEHOLD__" };
 
@@ -260,7 +263,7 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
 
     usize pos;
     {
-        const std::regex reAfters(R"(\n(attribute|varying|uniform|struct) )");
+        static const std::regex reAfters(R"(\n(attribute|varying|uniform|struct) )");
         usize            afterPos = searchLast(src, reAfters);
         if (afterPos != std::string::npos) {
             afterPos = nextLinePos(src, afterPos + 1);
@@ -270,7 +273,7 @@ inline usize FindIncludeInsertPos(const std::string& src, usize startPos) {
     {
         std::stack<usize> ifStack;
         usize             nowPos { 0 };
-        const std::regex  reIfs(R"((#if|#endif))");
+        static const std::regex reIfs(R"((#if|#endif))");
         while (true) {
             auto p = search(src, nowPos + 1, reIfs);
             if (p > mainPos || p == std::string::npos) break;
@@ -309,7 +312,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
 
     // workaround #require directive
     {
-        std::regex re_require("(^|\r?\n)#require (.+)(\r?\n)");
+        static const std::regex re_require("(^|\r?\n)#require (.+)(\r?\n)");
         src = std::regex_replace(src, re_require, "$1//#require $2$3");
     }
 
@@ -329,7 +332,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
                       &res,
                       includer);
 
-    std::regex re_io(R"(.+\s(in|out)\s[\s\w]+\s(\w+)\s*;)", std::regex::ECMAScript);
+    static const std::regex re_io(R"(.+\s(in|out)\s[\s\w]+\s(\w+)\s*;)", std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(res.begin(), res.end(), re_io);
          it != std::sregex_iterator();
          it++) {
@@ -341,7 +344,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         }
     }
 
-    std::regex re_tex(R"(uniform\s+sampler2D\s+g_Texture(\d+))", std::regex::ECMAScript);
+    static const std::regex re_tex(R"(uniform\s+sampler2D\s+g_Texture(\d+))", std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(res.begin(), res.end(), re_tex);
          it != std::sregex_iterator();
          it++) {
@@ -362,7 +365,8 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     if (pre != nullptr) {
         for (auto& [k, v] : pre->output) {
             if (! exists(cur.input, k)) {
-                auto n = std::regex_replace(v, std::regex(R"(\s*out\s)"), " in ");
+                static const std::regex re_out(R"(\s*out\s)");
+                auto                    n = std::regex_replace(v, re_out, " in ");
                 insert_str += n + '\n';
             }
         }
@@ -370,17 +374,19 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     if (next != nullptr) {
         for (auto& [k, v] : next->input) {
             if (! exists(cur.output, k)) {
-                auto n = std::regex_replace(v, std::regex(R"(\s*in\s)"), " out ");
+                static const std::regex re_in(R"(\s*in\s)");
+                auto                    n = std::regex_replace(v, re_in, " out ");
                 insert_str += n + '\n';
             }
         }
     }
-    std::regex re_hold(SHADER_PLACEHOLD.data());
-
-    // LOG_INFO("insert: %s", insert_str.c_str());
-    // return std::regex_replace(
-    //    std::regex_replace(cur.result, re_hold, insert_str), std::regex(R"(\s+\n)"), "\n");
-    return std::regex_replace(unit.src, re_hold, insert_str);
+    // the placeholder is a fixed string, no need for a regex
+    std::string out = unit.src;
+    for (auto pos = out.find(SHADER_PLACEHOLD); pos != std::string::npos;
+         pos      = out.find(SHADER_PLACEHOLD, pos + insert_str.size())) {
+        out.replace(pos, SHADER_PLACEHOLD.size(), insert_str);
+    }
+    return out;
 }
 
 // Some workshop shaders declare a varying with different vector sizes in
@@ -441,6 +447,45 @@ inline void FixVaryingMismatch(const std::string& vert_src, std::string& frag_sr
     frag_src = std::regex_replace(frag_src, re_main, "void _wek_main(");
     frag_src += "\nvoid main() {\n" + prologue + "    _wek_main();\n}\n";
 }
+
+// Compiled shaders by the hash of what went in, shared by every scene in the
+// process. Entries are small (the spir-v of a material's stages).
+class ShaderMemo {
+public:
+    static bool Find(const std::string& key, std::span<WPShaderUnit> units,
+                     std::vector<ShaderCode>& codes) {
+        std::lock_guard<std::mutex> lock(mutex());
+        auto                        it = entries().find(key);
+        if (it == entries().end() || it->second.infos.size() != units.size()) return false;
+        codes = it->second.codes;
+        for (usize i = 0; i < units.size(); i++) units[i].preprocess_info = it->second.infos[i];
+        return true;
+    }
+    static void Store(const std::string& key, std::span<const WPShaderUnit> units,
+                      const std::vector<ShaderCode>& codes) {
+        std::lock_guard<std::mutex> lock(mutex());
+        // a wallpaper has a few hundred at most; this only bounds a very long session
+        if (entries().size() >= 4096) entries().clear();
+        Entry e;
+        e.codes = codes;
+        for (const auto& unit : units) e.infos.push_back(unit.preprocess_info);
+        entries()[key] = std::move(e);
+    }
+
+private:
+    struct Entry {
+        std::vector<ShaderCode>         codes;
+        std::vector<WPPreprocessorInfo> infos;
+    };
+    static std::mutex& mutex() {
+        static std::mutex m;
+        return m;
+    }
+    static std::unordered_map<std::string, Entry>& entries() {
+        static std::unordered_map<std::string, Entry> e;
+        return e;
+    }
+};
 
 inline std::string GenSha1(std::span<const WPShaderUnit> units) {
     std::string shas { SHADER_COMPILE_VERSION };
@@ -548,6 +593,26 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
                                   std::vector<ShaderCode>& codes, fs::VFS& vfs,
                                   WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs) {
     (void)texs;
+    LoadStats::Timer timer(LoadStats::get().shader_ms);
+
+    // Most of a scene's materials use the same few shaders with the same
+    // combos, and every monitor showing a scene asks for the same ones again.
+    // The result of everything below is remembered for the life of the process.
+    std::string memo_key;
+    {
+        std::string all { SHADER_COMPILE_VERSION };
+        for (const auto& c : shader_info->combos) all += c.first + "=" + c.second + ";";
+        for (const auto& unit : units) {
+            all += "\n@stage " + std::to_string((int)unit.stage) + "\n";
+            all += unit.src;
+        }
+        memo_key = utils::genSha1(all);
+    }
+    if (ShaderMemo::Find(memo_key, units, codes)) return true;
+    auto memo = [&memo_key, &units, &codes](bool ok) {
+        if (ok) ShaderMemo::Store(memo_key, units, codes);
+        return ok;
+    };
 
     std::for_each(units.begin(), units.end(), [shader_info](auto& unit) {
         unit.src = Preprocessor(unit.src, unit.stage, shader_info->combos, unit.preprocess_info);
@@ -605,7 +670,8 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
 
         if (vfs.Contains(cache_file_path)) {
             auto cache_file = vfs.Open(cache_file_path);
-            if (cache_file && ::LoadShaderFromFile(codes, *cache_file, units.size())) return true;
+            if (cache_file && ::LoadShaderFromFile(codes, *cache_file, units.size()))
+                return memo(true);
             LOG_ERROR("shader cache \'%s\' is not usable, compiling again",
                       cache_file_path.c_str());
         }
@@ -625,9 +691,9 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         if (written && ! vfs.Rename(tmp_path, cache_file_path)) {
             LOG_ERROR("can't save shader cache \'%s\'", cache_file_path.c_str());
         }
-        return true;
+        return memo(true);
 
     } else {
-        return compile(units, codes);
+        return memo(compile(units, codes));
     }
 }

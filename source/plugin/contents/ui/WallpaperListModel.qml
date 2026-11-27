@@ -44,7 +44,6 @@ Item {
     property int countNoFilter: 0
 
     property var playlists: {}
-    property var folderModels: []
 
     function loadItemFromJson(text, el) {
         const project = Utils.parseJson(text);    
@@ -250,12 +249,21 @@ Item {
         this.onlyIdsChanged.connect(() => { if(root.restrictToIds) root.filterStrChanged(); });
         this.enabledChanged.connect(this.refresh.bind(this));
 
-        const fc = this.readfile;
+        let fc = this.readfile;
         this.readfileChanged.connect(function() {
             if(fc === root.readfile) return Promise.resolve();
             return root.refresh().then(() => { fc = root.readfile; });
         });
-        return this.refresh();
+        firstScan.start();
+    }
+
+    // The first scan reads every wallpaper's project.json. Plasma creates the
+    // settings page twice per open and throws the first one away at once; a
+    // timer dies with it, so only the page that stays pays for the scan.
+    Timer {
+        id: firstScan
+        interval: 0
+        onTriggered: root.refresh()
     }
 
     // scan once

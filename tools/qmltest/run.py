@@ -96,9 +96,32 @@ def scenario_schedule(tmp):
     }
 
 
-SCENARIOS = {"crossfade": scenario_crossfade, "schedule": scenario_schedule}
+def scenario_mixed(tmp):
+    def other(wid, file, kind):
+        return {"WallpaperWorkShopId": wid, "WallpaperSource": f"file://{WORKSHOP}/{wid}/{file}+{kind}"}
+    video = other("3349073961", "0001-0240.mp4", "video")
+    web = other("1252839488", "index.html", "web")
+    return {
+        "notes": [
+            "a scene, then a video with mpv, a web page, the same video with QtMultimedia, and a scene again",
+            "every change should fade: a second holder at 0, then ~, then one holder left",
+            "the video must not be revealed before it has a frame (no long gap between 'waiting=false' and '~')",
+        ],
+        "config": {**pick(A), "VideoBackend": 1},
+        "steps": [
+            {"at": 3000, "note": "to a video (mpv)", "set": video},
+            {"at": 8000, "note": "to a web page", "set": web},
+            {"at": 15000, "note": "QtMultimedia for videos", "set": {"VideoBackend": 0}},
+            {"at": 15500, "note": "to the video again", "set": video},
+            {"at": 21000, "note": "to a scene", "set": pick(B)},
+            {"at": 25000, "quit": True},
+        ],
+    }
 
-KEEP = re.compile(r"TEST |loading scene|Destroy sceneobject|schedule:|never drew|can't load scene|parse scene|"
+
+SCENARIOS = {"crossfade": scenario_crossfade, "schedule": scenario_schedule, "mixed": scenario_mixed}
+
+KEEP = re.compile(r"TEST |loading scene|wekde.mpv|Destroy sceneobject|schedule:|never drew|can't load scene|parse scene|"
                   r"TypeError|ReferenceError|Error:|Unable to assign|Cannot |is not a function|is not defined|"
                   r"qml: |Binding loop|not a usable", re.I)
 DROP = re.compile(r"read json|unknown tex|not found in render|_alias_lightCookie|looper|vulkan device|cache folder|"

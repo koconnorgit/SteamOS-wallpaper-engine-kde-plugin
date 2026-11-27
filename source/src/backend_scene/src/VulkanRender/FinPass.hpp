@@ -1,4 +1,5 @@
 #pragma once
+#include <unordered_map>
 #include "VulkanPass.hpp"
 #include <string>
 
@@ -30,7 +31,8 @@ public:
         VkClearValue    clear_value;
 
         StagingBufferRef   vertex_buf;
-        vvk::Framebuffer   fb;
+        // by the image view they render to
+        std::unordered_map<VkImageView, vvk::Framebuffer> fbs;
         PipelineParameters pipeline;
     };
 

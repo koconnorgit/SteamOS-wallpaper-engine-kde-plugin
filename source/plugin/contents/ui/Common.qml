@@ -223,9 +223,6 @@ QtObject {
     function getWpModelPreviewSource(model) {
         return model.preview ? `${model.path}/${model.preview}` : '';
     }
-    function getWpModelFileSource(model) {
-        return model.path ? `${model.path}/${model.file}+${model.type}` : '';
-    }
     function getWpModelProjectPath(model) {
         return model.path ? `${model.path}/project.json` : '';
     }
@@ -298,14 +295,6 @@ QtObject {
         return checklib('com.github.catsout.wallpaperEngineKde 1.2', parentItem);
     }
 
-    function checklib_folderlist(parentItem) {
-        return checklib('Qt.labs.folderlistmodel 2.11', parentItem)
-    }
-
-    function checklib_websockets(parentItem) {
-        return checklib('QtWebSockets 1.0', parentItem)
-    }
-
     function checklib_webchannel(parentItem) {
         return checklib('QtWebChannel 1.10', parentItem)
     }
@@ -313,9 +302,6 @@ QtObject {
 
     function cbCurrentValue(combo) {
         return combo.model[combo.currentIndex].value;
-    }
-    function cbValueOfIndex(combo, index) {
-        return combo.model[index].value;
     }
     function cbIndexOfValue(combo, value) {
         return modelIndexOfValue(combo.model,value);
@@ -341,16 +327,6 @@ QtObject {
             }
         }
         return null;
-    }
-    function genItemListStr(item, indent0, tostr) {
-        function gen(item, indent) {
-            let res = `${indent}${tostr(item)}\n`
-            for (let i = 0; i < item.children.length; i++) {
-                res += gen(item.children[i], indent + indent0); 
-            }
-            return res;
-        }
-        return gen(item, "");
     }
     function createVolumeFade(qobj, volume, changePlayerVolum) {
         const timer = Qt.createQmlObject(`import QtQuick 2.0; Timer {
@@ -384,11 +360,6 @@ QtObject {
         };
     }
 
-    function listProperty(item) {
-        for (var p in item)
-            console.error(p, ":", item[p]);
-    }
-    
     function urlNative(url) {
         const str = url.toString();
         if(str.startsWith('file://')) {

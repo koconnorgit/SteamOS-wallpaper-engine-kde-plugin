@@ -11,8 +11,11 @@ namespace wallpaper
 namespace vulkan
 {
 
+// `readable`: the caller reads the mapped memory back, so ask for cached memory.
+// Without it the driver may hand out write-combined memory, which is fine to
+// fill and very slow to read.
 inline bool CreateStagingBuffer(VmaAllocator allocator, std::size_t size,
-                                VmaBufferParameters& buffer) {
+                                VmaBufferParameters& buffer, bool readable = false) {
     VkBufferCreateInfo ci {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -23,6 +26,7 @@ inline bool CreateStagingBuffer(VmaAllocator allocator, std::size_t size,
 
     VmaAllocationCreateInfo vma_info = {};
     vma_info.usage                   = VMA_MEMORY_USAGE_CPU_ONLY;
+    if (readable) vma_info.preferredFlags = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     VVK_CHECK_BOOL_RE(vvk::CreateBuffer(allocator, ci, vma_info, buffer.handle));
     return true;
 }

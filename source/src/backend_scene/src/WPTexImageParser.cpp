@@ -9,6 +9,7 @@
 #include "Utils/Algorism.h"
 #include "Fs/VFS.h"
 #include "Utils/BitFlags.hpp"
+#include "Utils/LoadStats.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -149,6 +150,8 @@ void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
 } // namespace
 
 std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
+    LoadStats::Timer timer(LoadStats::get().tex_decode_ms);
+    LoadStats::get().tex_decoded++;
     std::string            path    = "/assets/materials/" + name + ".tex";
     std::shared_ptr<Image> img_ptr = std::make_shared<Image>();
     auto&                  img     = *img_ptr;
@@ -285,6 +288,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 }
 
 ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
+    LoadStats::Timer timer(LoadStats::get().tex_header_ms);
     ImageHeader header;
     std::string path  = "/assets/materials/" + name + ".tex";
     auto        pfile = m_vfs->Open(path);

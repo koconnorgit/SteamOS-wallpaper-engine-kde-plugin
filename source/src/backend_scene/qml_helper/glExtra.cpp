@@ -38,7 +38,6 @@ inline void CheckGlError(const char* file, const char* func, int line) {
 
 class GlExtra::impl {
 public:
-    bool                                       test;
     std::array<std::uint8_t, GL_UUID_SIZE_EXT> uuid;
 };
 

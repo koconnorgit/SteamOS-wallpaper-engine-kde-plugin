@@ -1,4 +1,5 @@
 
+#include "Utils/LoadStats.hpp"
 #include "Shader.hpp"
 #include "Swapchain.hpp"
 #include "TextureCache.hpp"
@@ -73,7 +74,9 @@ VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
                                        .compareEnable    = (false),
                                        .compareOp        = VK_COMPARE_OP_NEVER,
                                        .minLod           = (0.0f),
-                                       .maxLod           = (1.0f),
+                                       // all the levels the target has; shaders that
+                                       // blur by sampling low levels need them
+                                       .maxLod           = (float)std::max<uint>(key.mipmap_level, 1),
                                        .borderColor      = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
                                        .unnormalizedCoordinates = (false) };
     return sampler_info;
@@ -422,6 +425,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
     if (exists(m_tex_map, image.key)) {
         return m_tex_map.at(image.key);
     }
+    LoadStats::Timer timer(LoadStats::get().tex_upload_ms);
 
     ImageSlots img_slots;
 
@@ -503,6 +507,11 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
     }
     m_tex_map[image.key] = std::move(img_slots);
     return m_tex_map[image.key];
+}
+
+std::optional<ImageSlotsRef> TextureCache::FindTex(const std::string& key) {
+    if (exists(m_tex_map, key)) return ImageSlotsRef(m_tex_map.at(key));
+    return std::nullopt;
 }
 
 ImageSlotsRef TextureCache::FallbackTex() {
@@ -609,6 +618,7 @@ std::optional<ImageParameters> TextureCache::Query(std::string_view key, Texture
     query.content_hash = tex_hash;
     query.query_keys.insert(std::string(key));
     query.persist = persist;
+    LoadStats::Timer timer(LoadStats::get().rt_ms);
     if (auto opt = CreateTex(content_hash); opt.has_value()) {
         query.image = std::move(opt.value());
         return query.image;

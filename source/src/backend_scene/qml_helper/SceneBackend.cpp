@@ -11,13 +11,15 @@
 
 #include <QtGui/QOffscreenSurface>
 #include <QtQuick/QSGSimpleTextureNode>
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
 #include <QSGTexture>
-#endif
 
+#include <algorithm>
 #include <clocale>
+#include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <atomic>
 #include <array>
 #include <functional>
@@ -47,14 +49,7 @@ void* get_proc_address(const char* name) {
 }
 
 QSGTexture* createTextureFromGl(uint32_t handle, QSize size, QQuickWindow* window) {
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
     return QNativeInterface::QSGOpenGLTexture::fromNative(handle, window, size);
-#elif (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
-    return window->createTextureFromNativeObject(
-        QQuickWindow::NativeObjectTexture, &handle, 0, size);
-#else
-    return window->createTextureFromId(handle, size);
-#endif
 }
 
 wallpaper::FillMode ToWPFillMode(int fillMode) {
@@ -70,18 +65,73 @@ wallpaper::FillMode ToWPFillMode(int fillMode) {
 
 using sp_scene_t = std::shared_ptr<wallpaper::SceneWallpaper>;
 
+namespace
+{
+// Destroying a renderer waits for its threads and tears down its vulkan
+// device, tens of milliseconds. The last reference is usually dropped on the
+// gui or the scene graph render thread, where that is a missed frame for the
+// whole desktop. References are handed to this thread to drop instead.
+class SceneReaper {
+public:
+    static SceneReaper& instance() {
+        static SceneReaper reaper;
+        return reaper;
+    }
+    void release(sp_scene_t&& scene) {
+        if (! scene) return;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_queue.push_back(std::move(scene));
+        }
+        m_cv.notify_one();
+    }
+
+private:
+    SceneReaper(): m_thread([this]() {
+        run();
+    }) {}
+    // at process exit: finish what is queued, so no renderer is cut off mid teardown
+    ~SceneReaper() {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_stop = true;
+        }
+        m_cv.notify_one();
+        if (m_thread.joinable()) m_thread.join();
+    }
+    void run() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        while (true) {
+            m_cv.wait(lock, [this]() {
+                return m_stop || ! m_queue.empty();
+            });
+            if (m_queue.empty()) return;
+            sp_scene_t scene = std::move(m_queue.front());
+            m_queue.pop_front();
+            lock.unlock();
+            scene.reset();
+            lock.lock();
+        }
+    }
+
+    std::mutex              m_mutex;
+    std::condition_variable m_cv;
+    std::deque<sp_scene_t>  m_queue;
+    bool                    m_stop { false };
+    std::thread             m_thread;
+};
+} // namespace
+
 namespace scenebackend
 {
 
 class TextureNode : public QObject, public QSGSimpleTextureNode {
     Q_OBJECT
 public:
-    typedef std::function<QSGTexture*(QQuickWindow*)> EatFrameOp;
-    TextureNode(QQuickWindow* window, sp_scene_t scene, bool valid, EatFrameOp eatFrameOp)
+    TextureNode(QQuickWindow* window, sp_scene_t scene, bool valid)
         : m_texture(nullptr),
           m_scene(scene),
           m_enable_valid(valid),
-          m_eatFrameOp(eatFrameOp),
           m_window(window),
           m_first_frame(false),
           m_link(std::make_shared<Link>()) {
@@ -106,7 +156,7 @@ public:
             delete exh.qsg;
         }
         delete m_init_texture;
-        emit nodeDestroyed();
+        SceneReaper::instance().release(std::move(m_scene));
         _Q_INFO("Destroy texnode", "");
     }
 
@@ -141,10 +191,7 @@ public:
         m_scene->initVulkan(info);
     }
 
-    void emitSceneFirstFrame() { Q_EMIT sceneFirstFrame(); }
 signals:
-    void textureInUse();
-    void nodeDestroyed();
     void redraw();
     void sceneFirstFrame();
 
@@ -178,7 +225,6 @@ public slots:
 
             setTexture(m_texture);
             markDirty(DirtyMaterial);
-            Q_EMIT textureInUse();
 
             bool expected = true;
             if (m_first_frame.compare_exchange_strong(expected, false)) {
@@ -193,7 +239,6 @@ private:
 
     QSGTexture*       m_init_texture;
     QSGTexture*       m_texture;
-    EatFrameOp        m_eatFrameOp;
     QQuickWindow*     m_window;
     std::atomic<bool> m_first_frame;
 
@@ -227,6 +272,7 @@ SceneObject::SceneObject(QQuickItem* parent)
 // imported into the old node's gl context and can't be imported again, so the
 // item starts over with a new renderer.
 void SceneObject::resetScene() {
+    SceneReaper::instance().release(std::move(m_scene));
     m_scene = std::make_shared<wallpaper::SceneWallpaper>();
     m_scene->init();
     m_scene->setPropertyString(wallpaper::PROPERTY_CACHE_PATH, GetDefaultCachePath());
@@ -242,12 +288,9 @@ void SceneObject::resetScene() {
     if (m_paused) m_scene->pause();
 }
 
-SceneObject::~SceneObject() { _Q_INFO("Destroy sceneobject", ""); }
-
-void SceneObject::resizeFb() {
-    QSize size;
-    size.setWidth(this->width());
-    size.setHeight(this->height());
+SceneObject::~SceneObject() {
+    SceneReaper::instance().release(std::move(m_scene));
+    _Q_INFO("Destroy sceneobject", "");
 }
 
 QSGNode* SceneObject::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
@@ -255,11 +298,13 @@ QSGNode* SceneObject::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     if (! node) {
         if (m_had_node) resetScene();
         m_had_node = true;
-        node = new TextureNode(window(), m_scene, m_enable_valid, [this](QQuickWindow* window) {
-            return (QSGTexture*)nullptr;
-        });
+        node = new TextureNode(window(), m_scene, m_enable_valid);
         if (node->initGl()) {
-            node->initVulkan(width()*window()->devicePixelRatio(), height()*window()->devicePixelRatio());
+            // rounded: with fractional scaling, truncating loses a pixel and
+            // every frame gets resampled to fit
+            const qreal dpr = window()->devicePixelRatio();
+            node->initVulkan((uint16_t)std::clamp(qRound(width() * dpr), 1, 16384),
+                             (uint16_t)std::clamp(qRound(height() * dpr), 1, 16384));
 
             connect(
                 node, &TextureNode::redraw, window(), &QQuickWindow::update, Qt::QueuedConnection);
@@ -369,20 +414,12 @@ void SceneObject::setAcceptHover(bool value) { setAcceptHoverEvents(value); }
 
 void SceneObject::mousePressEvent(QMouseEvent* event) {}
 void SceneObject::mouseMoveEvent(QMouseEvent* event) {
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
     auto pos = event->position();
-#else
-    auto pos = event->localPos();
-#endif
     m_scene->mouseInput(pos.x() / width(), pos.y() / height());
 }
 
 void SceneObject::hoverMoveEvent(QHoverEvent* event) {
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
     auto pos = event->position();
-#else
-    auto pos = event->posF();
-#endif
     m_scene->mouseInput(pos.x() / width(), pos.y() / height());
 }
 

@@ -656,27 +656,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         LoadConstvalue(material, wpimgobj.material, shaderInfo);
     }
 
-    for (const auto& cs : wpimgobj.material.constantshadervalues) {
-        const auto&               name  = cs.first;
-        const std::vector<float>& value = cs.second;
-        std::string               glname;
-        if (shaderInfo.alias.count(name) != 0) {
-            glname = shaderInfo.alias.at(name);
-        } else {
-            for (const auto& el : shaderInfo.alias) {
-                if (el.second.substr(2) == name) {
-                    glname = el.second;
-                    break;
-                }
-            }
-        }
-        if (glname.empty()) {
-            LOG_ERROR("ShaderValue: %s not found in glsl", name.c_str());
-        } else {
-            material.customShader.constValues[glname] = value;
-        }
-    }
-
     // mesh
     SceneMesh effct_final_mesh {};
     auto      spMesh = std::make_shared<SceneMesh>();
