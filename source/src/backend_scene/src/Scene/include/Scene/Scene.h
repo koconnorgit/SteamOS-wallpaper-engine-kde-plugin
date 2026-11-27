@@ -7,6 +7,11 @@
 #include "SceneLight.hpp"
 
 #include "Core/NoCopyMove.hpp"
+#include "Interface/IVideoSource.h"
+
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace wallpaper
 {
@@ -35,6 +40,16 @@ public:
     std::unique_ptr<IShaderValueUpdater> shaderValueUpdater;
     std::unique_ptr<IImageParser>        imageParser;
     std::unique_ptr<fs::VFS>             vfs;
+
+    // Textures that are videos. The renderer copies each one's current
+    // picture into the texture named `key` before it draws a frame.
+    struct Video {
+        std::string                   key;
+        i32                           width { 0 };
+        i32                           height { 0 };
+        std::shared_ptr<IVideoSource> source;
+    };
+    std::vector<Video> videos;
 
     std::string scene_id { "unknown_id" };
 

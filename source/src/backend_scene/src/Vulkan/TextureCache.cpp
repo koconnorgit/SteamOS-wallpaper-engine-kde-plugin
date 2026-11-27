@@ -232,7 +232,7 @@ std::optional<ExImageParameters> CreateExImage(uint32_t width, uint32_t height, 
 inline std::optional<VmaImageParameters>
 CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat format,
             VkSamplerCreateInfo sampler_info, VkImageUsageFlags usage,
-            VmaMemoryUsage mem_usage = VMA_MEMORY_USAGE_GPU_ONLY) {
+            VmaMemoryUsage mem_usage = VMA_MEMORY_USAGE_GPU_ONLY, bool opaque = false) {
     VmaImageParameters image;
     do {
         VkImageCreateInfo info {
@@ -264,6 +264,11 @@ CreateImage(const Device& device, VkExtent3D extent, u32 miplevel, VkFormat form
                 .image    = *image.handle,
                 .viewType = VK_IMAGE_VIEW_TYPE_2D,
                 .format   = format,
+                // opaque: whatever is in the alpha channel, sample it as 1
+                .components = { VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,
+                                opaque ? VK_COMPONENT_SWIZZLE_ONE : VK_COMPONENT_SWIZZLE_IDENTITY },
                 .subresourceRange =
                     VkImageSubresourceRange {
                         .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -468,7 +473,10 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
                                    (u32)mipmap_levels,
                                    format,
                                    sampler_info,
-                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                   VMA_MEMORY_USAGE_GPU_ONLY,
+                                   // a video's frames come without alpha
+                                   image.video != nullptr);
             opt.has_value()) {
             image_paras = std::move(opt.value());
         } else {
@@ -512,6 +520,38 @@ ImageSlotsRef TextureCache::CreateTex(Image& image) {
 std::optional<ImageSlotsRef> TextureCache::FindTex(const std::string& key) {
     if (exists(m_tex_map, key)) return ImageSlotsRef(m_tex_map.at(key));
     return std::nullopt;
+}
+
+// A video writes each frame straight into a staging buffer that stays mapped
+// for as long as the texture lives, then asks for it to be copied over.
+uint8_t* TextureCache::UpdateTexBuffer(const std::string& key, usize size) {
+    if (! exists(m_tex_map, key)) return nullptr;
+    auto& up = m_update_bufs[key];
+    if (! up.buf.handle || up.buf.req_size < size) {
+        if (up.mapped) up.buf.handle.UnMapMemory();
+        up = {};
+        if (! CreateStagingBuffer(m_device.vma_allocator(), size, up.buf)) return nullptr;
+        if (up.buf.handle.MapMemory(&up.mapped) != VK_SUCCESS) return nullptr;
+    }
+    return static_cast<uint8_t*>(up.mapped);
+}
+
+bool TextureCache::UpdateTexCommit(const std::string& key, u32 width, u32 height) {
+    if (! exists(m_tex_map, key) || ! exists(m_update_bufs, key)) return false;
+    auto& slots = m_tex_map.at(key).slots;
+    auto& up    = m_update_bufs.at(key);
+    if (slots.empty() || up.buf.req_size < (usize)width * height * 4) return false;
+    if (! m_tex_cmd) allocateCmd();
+
+    BufferParameters buf = up.buf;
+    VkExtent3D       ext { width, height, 1 };
+    VVK_CHECK_BOOL_RE(CopyImageData(spanone<const BufferParameters> { buf },
+                                    spanone<const VkExtent3D> { ext },
+                                    m_device.graphics_queue().handle,
+                                    m_tex_cmd,
+                                    slots[0]));
+    VVK_CHECK_BOOL_RE(m_device.handle().WaitIdle());
+    return true;
 }
 
 ImageSlotsRef TextureCache::FallbackTex() {
@@ -580,6 +620,10 @@ TextureCache::TextureCache(const Device& device): m_device(device) {}
 TextureCache::~TextureCache() {};
 
 void TextureCache::Clear() {
+    for (auto& [key, up] : m_update_bufs) {
+        if (up.mapped) up.buf.handle.UnMapMemory();
+    }
+    m_update_bufs.clear();
     m_tex_map.clear();
     m_query_texs.clear();
     m_query_map.clear();

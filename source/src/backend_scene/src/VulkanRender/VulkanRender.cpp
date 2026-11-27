@@ -292,6 +292,18 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
             RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE((VkInstance)m_instance.inst()), NULL);
 #endif
 
+    // videos play on their own clock; take whatever picture each has now
+    for (auto& video : scene.videos) {
+        if (! video.source) continue;
+        const usize bytes = (usize)video.width * (usize)video.height * 4;
+        uint8_t*    frame = m_device->tex_cache().UpdateTexBuffer(video.key, bytes);
+        if (frame && video.source->NextFrame(frame)) {
+            m_device->tex_cache().UpdateTexCommit(
+                video.key, (u32)video.width, (u32)video.height);
+            m_rendering_resources.frame_changed = true;
+        }
+    }
+
     bool drawn = true;
     if (m_instance.offscreen()) {
         drawn = drawFrameOffscreen();

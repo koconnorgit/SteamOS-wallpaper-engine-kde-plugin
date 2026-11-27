@@ -10,6 +10,7 @@
 #include "Fs/VFS.h"
 #include "Utils/BitFlags.hpp"
 #include "Utils/LoadStats.hpp"
+#include "VideoDecoder.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -162,7 +163,8 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     LoadHeader(file, img.header);
 
     if (img.header.extraHeader["isvideo"].val == 1) {
-        LOG_ERROR("video texture \"%s\" is not supported", name.c_str());
+        // the layout with per-mipmap video headers; no file with it has turned up
+        LOG_ERROR("video texture \"%s\" has a layout that is not supported", name.c_str());
         return nullptr;
     }
 
@@ -251,9 +253,28 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 mipmap.height = h;
                 mipmap.size   = (isize)w * h * 4;
             } else {
-                // an mp4 stored as a texture; these have no pixel data to upload
-                if (src_size >= 8 && std::memcmp(result.get() + 4, "ftyp", 4) == 0)
-                    return bad("is a video texture, which is not supported");
+                // An mp4 stored as a texture. It is played into the texture
+                // frame by frame; what is uploaded now is a blank first frame.
+                if (src_size >= 8 && std::memcmp(result.get() + 4, "ftyp", 4) == 0) {
+                    if (i_image != 0 || i_mipmap != 0) return bad("unexpected video data");
+                    std::vector<uint8_t> movie(result.get(), result.get() + src_size);
+                    img.video = CreateVideoDecoder(std::move(movie), mipmap.width, mipmap.height);
+                    if (! img.video) return bad("is a video texture, and the video player is not available");
+                    const usize bytes = (usize)mipmap.width * (usize)mipmap.height * 4;
+                    auto        blank = std::make_unique<uint8_t[]>(bytes);
+                    for (usize i = 3; i < bytes; i += 4) blank[i] = 0xff;
+                    img.header.format = TextureFormat::RGBA8;
+                    mipmap.size       = (isize)bytes;
+                    mipmap.data       = ImageDataPtr(blank.release(), [](uint8_t* data) {
+                        delete[] data;
+                    });
+                    img_slot.width  = mipmap.width;
+                    img_slot.height = mipmap.height;
+                    SetHeaderPow2(img.header, mipmap.width, mipmap.height);
+                    mipmaps.resize(1);
+                    img.slots.resize(1);
+                    return img_ptr;
+                }
                 // the gpu copies width x height texels out of this buffer
                 if ((i64)src_size < ExpectedSize(img.header.format, mipmap.width, mipmap.height))
                     return bad("mipmap data is smaller than its size needs");

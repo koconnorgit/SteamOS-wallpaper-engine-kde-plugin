@@ -180,6 +180,11 @@ private:
                 frame_timer.Stop();
             else
                 frame_timer.Run();
+            // no point decoding frames nobody draws
+            if (m_scene) {
+                for (auto& video : m_scene->videos)
+                    if (video.source) video.source->SetPaused(stop);
+            }
         }
     }
     MHANDLER_CMD(DRAW) {

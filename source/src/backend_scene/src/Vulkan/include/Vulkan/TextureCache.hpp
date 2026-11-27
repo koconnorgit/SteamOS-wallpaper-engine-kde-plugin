@@ -50,6 +50,11 @@ public:
     std::optional<ImageSlotsRef>     FindTex(const std::string& key);
     // 1x1 transparent black, for samplers that have nothing else to show
     ImageSlotsRef                    FallbackTex();
+    // For videos: replace the picture of an RGBA texture made by CreateTex.
+    // Write the frame into the buffer the first call returns (it stays valid
+    // and mapped), then commit. The commit blocks until the gpu has it.
+    uint8_t* UpdateTexBuffer(const std::string& key, usize size);
+    bool     UpdateTexCommit(const std::string& key, u32 width, u32 height);
 
     std::optional<ImageParameters> Query(std::string_view key, TextureKey content_hash,
                                          bool persist = false);
@@ -66,6 +71,11 @@ private:
 
     const Device&                m_device;
     Map<std::string, ImageSlots> m_tex_map;
+    struct UpdateBuf {
+        VmaBufferParameters buf;
+        void*               mapped { nullptr };
+    };
+    Map<std::string, UpdateBuf> m_update_bufs;
 
     struct QueryTex {
         idx                index { 0 };

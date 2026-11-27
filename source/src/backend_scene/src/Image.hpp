@@ -1,4 +1,5 @@
 #pragma once
+#include "Interface/IVideoSource.h"
 #include <cstdint>
 #include <vector>
 #include <memory>
@@ -64,6 +65,8 @@ struct Image : NoCopy, NoMove {
     ImageHeader       header;
     std::vector<Slot> slots;
     std::string       key;
+    // set when the texture is a video; the slot then holds a blank first frame
+    std::shared_ptr<IVideoSource> video;
 };
 
 } // namespace wallpaper

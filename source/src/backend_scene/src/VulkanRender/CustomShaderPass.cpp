@@ -123,6 +123,14 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             auto image = scene.imageParser->Parse(tex_name);
             if (image) {
                 img_slots = device.tex_cache().CreateTex(*image);
+                if (image->video && ! image->slots.empty()) {
+                    Scene::Video video;
+                    video.key    = tex_name;
+                    video.width  = image->slots[0].width;
+                    video.height = image->slots[0].height;
+                    video.source = image->video;
+                    scene.videos.push_back(std::move(video));
+                }
             } else {
                 LOG_ERROR("parse tex \"%s\" failed", tex_name.c_str());
             }

@@ -49,6 +49,7 @@ add_library(
   WPSoundParser.cpp
   WPMdlParser.cpp
   WPPuppet.cpp
+  VideoDecoder.cpp
   SceneWallpaper.cpp)
 
 set(InteralLib
@@ -67,6 +68,17 @@ target_link_libraries(
   PUBLIC wpUtils
   PRIVATE ${InteralLib} nlohmann_json ${LZ4_LIBRARIES}
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
+
+# Video textures (an mp4 stored in a scene) are played with libmpv. Without
+# it the renderer still builds, and such a texture is skipped.
+pkg_check_modules(MPV IMPORTED_TARGET mpv)
+if(MPV_FOUND)
+  target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::MPV)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE WP_HAVE_MPV)
+  message(STATUS "mpv found: video textures in scenes enabled")
+else()
+  message(STATUS "mpv not found: video textures in scenes disabled")
+endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC . Swapchain)
 set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE ON)
