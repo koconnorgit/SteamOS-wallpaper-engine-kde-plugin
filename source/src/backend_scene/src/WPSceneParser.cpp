@@ -321,6 +321,12 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
                 textures.resize(t.first + 1);
             }
             textures[t.first] = t.second;
+            // some effects bundled in the pkg (glitter, caustics, cloudmotion) default
+            // to a noise texture that is not shipped with the assets
+            if (t.second == "util/perlin_256" &&
+                ! vfs.Contains("/assets/materials/" + t.second + ".tex")) {
+                textures[t.first] = "util/noise";
+            }
         }
     }
 
@@ -774,7 +780,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 for (usize i = 0; i < wpeffobj.fbos.size(); i++) {
                     const auto& wpfbo  = wpeffobj.fbos.at(i);
                     std::string rtname = wpfbo.name + "_" + effaddr;
-                    if (wpimgobj.fullscreen) {
+                    if (wpfbo.width > 0 && wpfbo.height > 0) {
+                        // fbo with its own size, e.g. a tile to be repeated
+                        scene.renderTargets[rtname] = { .width      = (i32)wpfbo.width,
+                                                        .height     = (i32)wpfbo.height,
+                                                        .allowReuse = true };
+                    } else if (wpimgobj.fullscreen) {
                         scene.renderTargets[rtname]      = { 2, 2, true };
                         scene.renderTargets[rtname].bind = {
                             .enable = true,
@@ -788,6 +799,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                             .height     = (uint16_t)(wpimgobj.size[1] / (float)wpfbo.scale),
                             .allowReuse = true
                         };
+                    }
+                    if (wpfbo.uvs == "repeat") {
+                        auto& sample = scene.renderTargets[rtname].sample;
+                        sample.wrapS = sample.wrapT = TextureWrap::REPEAT;
                     }
                     fboMap[wpfbo.name] = rtname;
                 }

@@ -110,7 +110,29 @@ void LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
 
     header.count = file.ReadInt32();
 
-    if (header.extraHeader["texb"].val == 3) header.type = static_cast<ImageType>(file.ReadInt32());
+    const i32 texb = header.extraHeader["texb"].val;
+    if (texb == 3) {
+        header.type = static_cast<ImageType>(file.ReadInt32());
+    } else if (texb >= 4) {
+        // TEXB0004 adds a video flag after the container image type
+        header.type                        = static_cast<ImageType>(file.ReadInt32());
+        header.extraHeader["isvideo"].val = file.ReadInt32() == 1 ? 1 : 0;
+    }
+}
+
+// TEXB0004 video textures prefix every mipmap with extra fields,
+// still images keep the TEXB0003 layout
+bool SkipMipmapV4Header(fs::IBinaryStream& file, ImageHeader& header) {
+    if (header.extraHeader["texb"].val < 4 || header.extraHeader["isvideo"].val != 1) return true;
+    file.ReadInt32();
+    file.ReadInt32();
+    // condition json, null terminated
+    char c { 0 };
+    do {
+        if (file.Read(&c, 1) != 1) return false;
+    } while (c != '\0');
+    file.ReadInt32();
+    return true;
 }
 
 void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
@@ -132,6 +154,11 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     auto  startpos = file.Tell();
     LoadHeader(file, img.header);
 
+    if (img.header.extraHeader["isvideo"].val == 1) {
+        LOG_ERROR("video texture \"%s\" is not supported", name.c_str());
+        return nullptr;
+    }
+
     // image
     i32 _image_count = img.header.count;
     if (_image_count < 0) return nullptr;
@@ -147,6 +174,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
         // load image
         for (usize i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
             auto& mipmap  = mipmaps.at(i_mipmap);
+            if (! SkipMipmapV4Header(file, img.header)) return nullptr;
             mipmap.width  = file.ReadInt32();
             mipmap.height = file.ReadInt32();
             if (i_mipmap == 0) {
@@ -185,10 +213,17 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 }
             }
             // is image container
-            if (img.header.extraHeader["texb"].val == 3 && img.header.type != ImageType::UNKNOWN) {
-                int32_t w, h, n;
+            if (img.header.extraHeader["texb"].val >= 3 && img.header.type != ImageType::UNKNOWN) {
+                int32_t w { 0 }, h { 0 }, n { 0 };
                 auto*   data =
                     stbi_load_from_memory((const unsigned char*)result, src_size, &w, &h, &n, 4);
+                if (data == nullptr) {
+                    LOG_ERROR("decode image container of \"%s\" failed, type: %d",
+                              name.c_str(),
+                              (int)img.header.type);
+                    delete[] result;
+                    return nullptr;
+                }
                 mipmap.data = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
                     stbi_image_free((unsigned char*)data);
                 });
@@ -225,6 +260,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
         for (usize i_image = 0; i_image < image_count; i_image++) {
             int mipmap_count = file.ReadInt32();
             for (int32_t i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
+                if (! SkipMipmapV4Header(file, header)) return header;
                 int32_t width  = file.ReadInt32();
                 int32_t height = file.ReadInt32();
                 if (i_mipmap == 0) {
@@ -291,6 +327,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     } else {
         i32 mipmap_count = file.ReadInt32();
         (void)mipmap_count;
+        if (! SkipMipmapV4Header(file, header)) return header;
         i32 width  = file.ReadInt32();
         i32 height = file.ReadInt32();
         SetHeaderPow2(header, width, height);

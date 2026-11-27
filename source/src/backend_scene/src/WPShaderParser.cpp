@@ -359,6 +359,65 @@ inline std::string Finalprocessor(const WPShaderUnit& unit, const WPPreprocessor
     return std::regex_replace(unit.src, re_hold, insert_str);
 }
 
+// Some workshop shaders declare a varying with different vector sizes in
+// the vertex and fragment stage (hlsl accepts that, glsl fails at link).
+// Make the fragment input match the vertex output, and feed the original
+// fragment code a converted copy.
+inline void FixVaryingMismatch(const std::string& vert_src, std::string& frag_src) {
+    auto components = [](const std::string& type) -> usize {
+        if (type == "float") return 1;
+        return (usize)(type.back() - '0');
+    };
+    auto scan = [](const std::string& src, const char* io) {
+        Map<std::string, std::string> res; // name to type
+        const std::regex re(std::string(R"(\b)") + io + R"(\s+(?:\w+\s+)*?(float|vec[234])\s+(\w+)\s*;)");
+        for (auto it = std::sregex_iterator(src.begin(), src.end(), re);
+             it != std::sregex_iterator();
+             it++) {
+            res[(*it)[2].str()] = (*it)[1].str();
+        }
+        return res;
+    };
+
+    const auto vert_outs = scan(vert_src, "out");
+    const auto frag_ins  = scan(frag_src, "in");
+
+    std::string prologue;
+    for (const auto& [name, frag_type] : frag_ins) {
+        if (! exists(vert_outs, name)) continue;
+        const auto& vert_type = vert_outs.at(name);
+        if (vert_type == frag_type) continue;
+
+        const std::string local = "_wek_" + name;
+
+        // the fragment code uses the local copy from now on
+        frag_src = std::regex_replace(frag_src, std::regex("\\b" + name + "\\b"), local);
+        // and its declaration becomes the real input plus the local copy
+        const std::regex re_decl(R"(\bin(\s+(?:\w+\s+)*?))" + frag_type + R"(\s+)" + local +
+                                 R"(\s*;)");
+        frag_src = std::regex_replace(frag_src,
+                                      re_decl,
+                                      "in$1" + vert_type + " " + name + ";\n" + frag_type + " " +
+                                          local + ";",
+                                      std::regex_constants::format_first_only);
+
+        const usize nv = components(vert_type), nf = components(frag_type);
+        std::string value = name;
+        for (usize i = nv; i < nf; i++) value += ", 0.0";
+        prologue += "    " + local + " = " + frag_type + "(" + value + ");\n";
+
+        LOG_INFO("varying \"%s\" is %s in vertex but %s in fragment, converted",
+                 name.c_str(),
+                 vert_type.c_str(),
+                 frag_type.c_str());
+    }
+    if (prologue.empty()) return;
+
+    const std::regex re_main(R"(\bvoid\s+main\s*\()");
+    frag_src = std::regex_replace(frag_src, re_main, "void _wek_main(");
+    frag_src += "\nvoid main() {\n" + prologue + "    _wek_main();\n}\n";
+}
+
 inline std::string GenSha1(std::span<const WPShaderUnit> units) {
     std::string shas;
     for (auto& unit : units) {
@@ -442,7 +501,12 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
             LOG_ERROR("combo '%s' can't be empty", cup.c_str());
             continue;
         }
-        header.append("#define " + cup + " " + c.second + "\n");
+        std::string value(c.second);
+        // effects bundled in the pkg (glitter, caustics) default to blend mode 32,
+        // which common_blending.h doesn't know and would treat as normal (replace).
+        // They are meant to add light, so use linear add.
+        if (cup == "BLENDMODE" && value == "32") value = "31";
+        header.append("#define " + cup + " " + value + "\n");
     }
     return header + src;
 }
@@ -469,6 +533,11 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
                 i + 1 < units.size() ? &units[i + 1].preprocess_info : nullptr;
 
             unit.src = Finalprocessor(unit, pre_info, post_info);
+
+            if (i >= 1 && unit.stage == ShaderType::FRAGMENT &&
+                units[i - 1].stage == ShaderType::VERTEX) {
+                FixVaryingMismatch(units[i - 1].src, unit.src);
+            }
 
             vunit.src   = unit.src;
             vunit.stage = ToGLSL(unit.stage);

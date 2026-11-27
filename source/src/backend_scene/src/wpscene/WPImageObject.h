@@ -34,6 +34,10 @@ public:
     std::string name;
     std::string format;
     uint32_t    scale { 1 };
+    // fixed size, 0 for following the image size
+    uint32_t    width { 0 };
+    uint32_t    height { 0 };
+    std::string uvs;
 };
 
 class WPImageEffect {
