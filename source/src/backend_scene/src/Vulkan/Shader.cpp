@@ -282,7 +282,6 @@ bool wallpaper::vulkan::GenReflect(std::span<const std::vector<uint>> codes,
             }
             if (b.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
                 auto& block      = b.block;
-                auto  block_name = std::string(block.name).empty() ? bind_name : block.name;
                 ref.blocks.push_back(ShaderReflected::Block { //.index = i,
                                                               .size       = block.size,
                                                               .name       = block.name,

@@ -125,7 +125,6 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
     auto* mesh = node->Mesh();
     if (mesh->Material() == nullptr) return;
     auto* material   = mesh->Material();
-    auto* mshaderPtr = material->customShader.shader.get();
 
     SceneImageEffectLayer* imgeff = nullptr;
     if (! node->Camera().empty() && scene.cameras.count(node->Camera()) > 0) {

@@ -5,10 +5,13 @@
     tools/qmltest/run.py crossfade       # one of them
     tools/qmltest/run.py --list
 
-A window opens for the length of each scenario. Nothing is asserted: the
-script prints what happened (wallpapers loaded and destroyed, the state of the
-crossfade, schedule decisions, QML errors) for a person to read against the
-scenario's notes. The harness uses a private config directory, so the real
+A window opens for the length of each scenario. The script prints what
+happened (wallpapers loaded and destroyed, the state of the crossfade, schedule
+decisions, QML errors) and checks the basics: the number of wallpapers loaded,
+a clean end state with one wallpaper showing, no JavaScript errors, and a few
+lines each scenario must or must not produce. It exits non-zero if a check
+fails. The finer points in each scenario's notes are still for a person to
+read against the output. The harness uses a private config directory, so the real
 playlists and per-wallpaper options are not touched.
 
 main.qml is taken from the working tree, the C++ plugin from source/build.
@@ -75,6 +78,8 @@ def scenario_crossfade(tmp):
             "15 s: change to a scene that cannot load. After 15 s it is given up and E stays",
             "34 s: change to A. The crossfade still works after the failure",
         ],
+        "loads": 7,
+        "must": [r"never drew a frame, keeping the previous one"],
         "config": {**pick(A)},
         "steps": [
             {"at": 3000, "note": "to B", "set": pick(B)},
@@ -107,6 +112,9 @@ def scenario_schedule(tmp):
             "about 20 s in the playlist steps: one 'schedule:' line and one crossfade",
             "30 s: a hand pick (B). The schedule must leave it alone at the next step",
         ],
+        "loads": 3,
+        "must": [r"schedule: 00:00 -> \d+"],
+        "must_not": [rf"loading scene: {E}/"],
         "config": {**pick(E), "ScheduleConf": json.dumps(conf)},
         "steps": [
             {"at": 30000, "note": "hand pick B", "set": {**pick(B), "ScheduleManualPick": "1"}},
@@ -126,6 +134,7 @@ def scenario_mixed(tmp):
             "every change should fade: a second holder at 0, then ~, then one holder left",
             "the video must not be revealed before it has a frame (no long gap between 'waiting=false' and '~')",
         ],
+        "loads": 2,
         "config": {**pick(A), "VideoBackend": 1},
         "steps": [
             {"at": 3000, "note": "to a video (mpv)", "set": video},
@@ -145,6 +154,7 @@ def scenario_static(tmp):
             "to a scene that draws three frames and then stops, and away from it again",
             "it has to fade in like any other, stay up, and fade out",
         ],
+        "loads": 3,
         "config": {**pick(A)},
         "steps": [
             {"at": 3000, "note": "to the still scene", "set": pick(still)},
@@ -191,9 +201,11 @@ def run(name):
         p = subprocess.Popen([qml, "-I", str(HERE / "imports"), "-I", str(tmp / "imports"), str(HERE / "harness.qml"),
                               "--", json.dumps(spec)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         t0 = time.time()
+        everything = []
         try:
             for line in p.stderr:
                 line = line.rstrip()
+                everything.append(line)
                 if DROP.search(line) or not KEEP.search(line):
                     continue
                 stamp = "" if "TEST " in line else f"[{(time.time() - t0) * 1000:6.0f}] "
@@ -201,6 +213,39 @@ def run(name):
         finally:
             p.wait(timeout=30)
         print(f"   exit {p.returncode}")
+        return check(sc, everything, p.returncode)
+
+
+JS_ERRORS = re.compile(r"TypeError|ReferenceError|SyntaxError|is not a function|is not defined|Cannot read property|"
+                       r"Cannot call method|Unable to assign \[undefined\] to (?!QRect)")
+
+
+def check(sc, lines, code):
+    """The checks every scenario has to pass. Returns the failures as text."""
+    failed = []
+    if code != 0:
+        failed.append(f"exit code {code}")
+    loads = sum(1 for l in lines if "loading scene:" in l)
+    if "loads" in sc and loads != sc["loads"]:
+        failed.append(f"{loads} scenes loaded, expected {sc['loads']}")
+    states = [l for l in lines if "holders=[" in l]
+    if not states or "holders=[1] waiting=false item=yes old=no" not in states[-1]:
+        failed.append(f"did not end with one wallpaper showing: {states[-1][-60:] if states else 'no state seen'}")
+    errors = [l for l in lines if JS_ERRORS.search(l)]
+    if errors:
+        failed.append(f"{len(errors)} JavaScript errors, first: {errors[0][:160]}")
+    for pattern in sc.get("must", []):
+        if not any(re.search(pattern, l) for l in lines):
+            failed.append(f"nothing matched /{pattern}/")
+    for pattern in sc.get("must_not", []):
+        hit = [l for l in lines if re.search(pattern, l)]
+        if hit:
+            failed.append(f"/{pattern}/ matched: {hit[0][:120]}")
+    for f in failed:
+        print(f"   FAILED  {f}")
+    if not failed:
+        print("   passed")
+    return failed
 
 
 def run_dialog():
@@ -234,8 +279,20 @@ def run_dialog():
         print(f"   exit {p.returncode}")
 
 
+def screen_locked():
+    """True while the session is locked. Qt stops driving a window's timers when it is not drawn."""
+    try:
+        out = subprocess.run(["qdbus6", "org.freedesktop.ScreenSaver", "/ScreenSaver",
+                              "org.freedesktop.ScreenSaver.GetActive"], capture_output=True, text=True, timeout=5).stdout
+        return out.strip() == "true"
+    except Exception:
+        return False
+
+
 def main():
     args = sys.argv[1:]
+    if screen_locked():
+        sys.exit("the screen is locked: the test window would not be drawn and the run would stall")
     if "dialog" in args:
         run_dialog()
         args = [a for a in args if a != "dialog"]
@@ -244,10 +301,12 @@ def main():
     if "--list" in args:
         print("\n".join(SCENARIOS))
         return
+    failed = 0
     for name in args or list(SCENARIOS):
         if name not in SCENARIOS:
             sys.exit(f"no scenario {name}; have {', '.join(SCENARIOS)}")
-        run(name)
+        failed += 1 if run(name) else 0
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

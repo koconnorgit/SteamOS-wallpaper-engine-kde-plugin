@@ -251,9 +251,10 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
         } else if (sstart_with(name, WE_HALF_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_FULL_COMPO_BUFFER_PREFIX)) {
-        } else {
-            LOG_ERROR("unknown tex \"%s\"", name.c_str());
         }
+        // Anything else is an effect's own fbo, or something this renderer
+        // doesn't provide; the caller reports the latter when it looks the
+        // name up among the render targets.
     }
 }
 
@@ -778,7 +779,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     const auto& wpfbo  = wpeffobj.fbos.at(i);
                     // the effect index keeps two effects on one image, both with
                     // an fbo of this name, from sharing a render target
-                    std::string rtname = wpfbo.name + "_" + effaddr + "_" + std::to_string(i_eff);
+                    // Render targets are told from texture files by the "_rt_"
+                    // prefix. Not every effect names its fbos that way
+                    // ("_coc", "_downscaled1"), so it is added where missing.
+                    std::string rtname = (IsSpecTex(wpfbo.name) ? "" : std::string(WE_SPEC_PREFIX)) +
+                                         wpfbo.name + "_" + effaddr + "_" + std::to_string(i_eff);
                     if (wpfbo.width > 0 && wpfbo.height > 0) {
                         // fbo with its own size, e.g. a tile to be repeated
                         scene.renderTargets[rtname] = { .width      = ClampRtSize(wpfbo.width),

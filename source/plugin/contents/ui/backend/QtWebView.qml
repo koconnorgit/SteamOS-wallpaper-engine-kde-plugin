@@ -1,13 +1,16 @@
 import QtQuick 2.5
 import QtWebEngine 1.10
 import QtWebChannel 1.10
+import com.github.catsout.wallpaperEngineKde 1.2
 import ".."
 import "../js/utils.mjs" as Utils
 
 Item {
     id: webItem
     anchors.fill: parent
-    property alias source: web.url
+    // Not an alias for web.url: the page must not start loading before the
+    // scripts below are registered, or it runs without them.
+    property url source
     property bool hasLib: background.hasLib
     // this wallpaper's own options (see optionsComponent in main.qml)
     property var opts
@@ -20,6 +23,8 @@ Item {
             webobj.sigGeneralProperties(webobj.sigGeneralProperties);
         }
     }
+
+    FileHelper { id: files }
 
     Image {
         id: pauseImage
@@ -107,13 +112,15 @@ Item {
         }
 
         Component.onCompleted: {
+            // The channel library used to be a script of its own, injected at
+            // document creation, with the injector below relying on the
+            // QWebChannel it defines. That did not hold up: the injector ran
+            // into "QWebChannel is not defined", and wallpapers got neither
+            // their properties nor audio data. The library's text now goes in
+            // front of the injector, in the same script.
+            const channelLib = String(files.readFile(":/qtwebchannel/qwebchannel.js"));
+            if (!channelLib) console.error("could not read qwebchannel.js; the page will not get its properties");
             userScripts.insert([
-                {
-                    injectionPoint: WebEngineScript.DocumentCreation,
-                    worldId: WebEngineScript.MainWorld,
-                    name: "QWebChannel",
-                    sourceUrl: "qrc:///qtwebchannel/qwebchannel.js"
-                },
                 {
                     injectionPoint: WebEngineScript.DocumentCreation,
                     worldId: WebEngineScript.MainWorld,
@@ -131,7 +138,7 @@ Item {
                     worldId: WebEngineScript.MainWorld,
                     injectionPoint: WebEngineScript.Deferred,
                     name: "ObjectInjector",
-                    sourceCode: `
+                    sourceCode: channelLib + `
                         new QWebChannel(qt.webChannelTransport, function(channel) {
                             window.wpeQml = channel.objects.wpeQml;
                             const wpeQml = window.wpeQml;
@@ -151,6 +158,8 @@ Item {
                 }
             ])
             background.nowBackend = 'QtWebEngine';
+            // scripts registered: now load, and follow later changes
+            web.url = Qt.binding(() => webItem.source);
         }
 
     }

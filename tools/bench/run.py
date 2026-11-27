@@ -138,6 +138,8 @@ def sample(pid):
 
 
 def run_window(plugin_dir, scenes, quick, tmp, cycles=None):
+    if screen_locked():
+        return {"skipped": "the screen is locked; the window would not be drawn and the run would stall"}
     lib = plugin_dir / "libWallpaperEngineKde.so"
     qml = shutil.which("qml6") or shutil.which("qml")
     if not lib.exists() or not qml:
@@ -237,6 +239,16 @@ def report(label, env, scene_ids, headless, window):
           f"While one is destroyed: median {med(window['drop_gap_ms']):.0f} ms, worst {max(window['drop_gap_ms'], default=float('nan')):.0f} ms.")
     w("")
     return "\n".join(L)
+
+
+def screen_locked():
+    """True while the session is locked. Qt stops driving a window's timers when it is not drawn."""
+    try:
+        out = subprocess.run(["qdbus6", "org.freedesktop.ScreenSaver", "/ScreenSaver",
+                              "org.freedesktop.ScreenSaver.GetActive"], capture_output=True, text=True, timeout=5).stdout
+        return out.strip() == "true"
+    except Exception:
+        return False
 
 
 def main():

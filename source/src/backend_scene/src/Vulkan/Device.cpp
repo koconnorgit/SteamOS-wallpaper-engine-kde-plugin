@@ -74,7 +74,7 @@ std::vector<VkDeviceQueueCreateInfo> Device::ChooseDeviceQueue(VkSurfaceKHR surf
     m_present_queue.family_index = graphic_indexs.front();
     if (surface) {
         index = 0;
-        for (auto& prop : props) {
+        for (usize i = 0; i < props.size(); i++) {
             bool ok { false };
             VVK_CHECK(m_gpu.GetSurfaceSupportKHR(index, surface, ok))
             if (ok) present_indexs.push_back(index);

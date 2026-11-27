@@ -89,7 +89,6 @@ bool Instance::ChoosePhysicalDevice(const CheckGpuOp&             checkgpu,
                                     std::span<const std::uint8_t> uuid) {
     auto deviceList = m_vinst.EnumeratePhysicalDevices();
 
-    VkInstanceCreateInfo crea;
     auto                 logGpu = [](const VkPhysicalDeviceProperties& props) {
         LOG_INFO("vulkan device: %s", props.deviceName);
     };

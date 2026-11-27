@@ -29,6 +29,20 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
       CACHE STRING "Choose the type of build." FORCE)
 endif()
 
+# Everything is linked into one plugin library, so link time optimisation can
+# work across the renderer's static libraries. Off by default: it lengthens the
+# build a good deal and its effect on this code has not been measured.
+option(ENABLE_LTO "Build with link time optimisation" OFF)
+if(ENABLE_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT WEK_IPO_OK OUTPUT WEK_IPO_MSG)
+  if(WEK_IPO_OK)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+  else()
+    message(WARNING "ENABLE_LTO is on but not supported: ${WEK_IPO_MSG}")
+  endif()
+endif()
+
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX
       /usr

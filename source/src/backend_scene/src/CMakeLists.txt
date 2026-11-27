@@ -15,7 +15,7 @@ if(ENDIAN)
 endif()
 
 set(warn_opts
-    -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wno-unused-variable
+    -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
     CACHE INTERNAL "")
 
 include_directories(.)

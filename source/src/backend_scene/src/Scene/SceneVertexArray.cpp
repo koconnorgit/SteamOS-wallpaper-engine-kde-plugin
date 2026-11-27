@@ -62,7 +62,6 @@ bool SceneVertexArray::AddVertex(const float* data) {
     if (m_size + m_oneSize >= m_capacity) return false;
     usize  pos   = 0;
     usize  mpos  = 0;
-    float* mData = m_pData + m_size;
     for (const auto& el : m_attributes) {
         auto typeSize = SceneVertexArray::TypeCount(el.type);
         std::copy(data + pos, data + pos + typeSize, m_pData + mpos);

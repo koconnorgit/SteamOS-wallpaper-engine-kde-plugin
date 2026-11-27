@@ -156,7 +156,6 @@ void StagingBuffer::destroy() {
 
 bool StagingBuffer::allocateSubRef(VkDeviceSize size, StagingBufferRef& ref,
                                    VkDeviceSize alignment) {
-    VkResult                       result;
     VmaVirtualAllocationCreateInfo allocCreateInfo = {};
     allocCreateInfo.size                           = size;
     allocCreateInfo.alignment                      = alignment;
