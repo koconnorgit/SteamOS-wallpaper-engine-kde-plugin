@@ -74,6 +74,10 @@
       <label>Runtime state: a hand-picked wallpaper is kept until this time (epoch ms)</label>
       <default></default>
     </entry>
+    <entry name="ScheduleAppliedKey" type="String">
+      <label>Runtime state: identifies the schedule step whose wallpaper was last applied</label>
+      <default></default>
+    </entry>
     <!-- Legacy Day/Night switch: only read once, to migrate into ScheduleConf -->
     <entry name="DayNightSwitch" type="Bool">
       <label>Legacy day/night switch</label>

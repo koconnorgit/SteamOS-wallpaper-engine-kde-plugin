@@ -53,9 +53,14 @@ Flickable {
     }
     function playlistSummary(pl) {
         const n = pl.items.length;
-        const count = n === 1 ? "1 wallpaper" : `${n} wallpapers`;
-        if (n < 2) return count;
-        return `${count} · ${pl.order === 'shuffle' ? 'shuffled' : 'in order'} · every ${Sched.formatDuration(pl.interval)}`;
+        return n === 1 ? "1 wallpaper" : `${n} wallpapers`;
+    }
+    // a slot's playlist, with how that slot rotates through it
+    function slotPlaylistSummary(target, pl) {
+        const count = playlistSummary(pl);
+        if (pl.items.length < 2) return count;
+        const how = Sched.rotation(conf, target);
+        return `${count} · ${how.order === 'shuffle' ? 'shuffled' : 'in order'} · every ${Sched.formatDuration(how.interval)}`;
     }
     function todaySunText() {
         if (!sun) return "";
@@ -70,7 +75,8 @@ Flickable {
         if (holdUntil > now)
             return `Keeping the wallpaper you picked by hand until ${formatTime(holdUntil)}.`;
         if (!current) return "No slot can fire yet.";
-        const what = current.item ? current.item.title : "nothing assigned";
+        const shown = root.scheduleShowing;
+        const what = shown ? shown.title : "nothing assigned";
         let text = `Now: ${triggerText(current.slot.trigger)} → ${what}`;
         if (current.playlist) text += ` (${current.playlist.name})`;
         if (current.nextChangeAt) text += `. Next change at ${formatTime(current.nextChangeAt)}.`;
@@ -222,7 +228,7 @@ Flickable {
                             visible: Boolean(slotRow.playlist)
                             elide: Text.ElideRight
                             color: Kirigami.Theme.disabledTextColor
-                            text: slotRow.playlist ? schedulePage.playlistSummary(slotRow.playlist) : ""
+                            text: slotRow.playlist ? schedulePage.slotPlaylistSummary(slotRow.target, slotRow.playlist) : ""
                         }
                     }
 
@@ -267,7 +273,11 @@ Flickable {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: Kirigami.Theme.disabledTextColor
-            text: "A playlist rotates through its wallpapers while its slot is in effect. " +
+            text: "Playlists are shared by all monitors: each monitor has its own slots, " +
+                  "and any of them can use any playlist. " +
+                  "A playlist skips a wallpaper that another monitor is already showing. " +
+                  "A playlist is just a list of wallpapers; how often to change, and in what order, " +
+                  "is set on each slot that uses it. " +
                   "Add wallpapers from the Wallpapers tab with the calendar button on each card."
         }
 
@@ -318,7 +328,7 @@ Flickable {
                         }
                         ToolButton {
                             icon.name: "document-edit-symbolic"
-                            ToolTip.text: "Rename, order and interval"
+                            ToolTip.text: "Rename"
                             ToolTip.visible: hovered
                             onClicked: playlistDialog.openFor(playlistBox.playlist)
                         }
@@ -422,6 +432,9 @@ Flickable {
         property string slotId: ""
         // entries: { text, target }
         property var targets: []
+        readonly property bool playlistChosen: targetBox.currentIndex >= 0
+            && targetBox.currentIndex < targets.length
+            && targets[targetBox.currentIndex].target.type === 'playlist'
 
         function openFor(slot, wallpaper) {
             slotId = slot ? slot.id : "";
@@ -467,6 +480,11 @@ Flickable {
             else if (!wallpaper && slot && slot.target.type === 'none')
                 at = list.length - 1;
             targetBox.currentIndex = Math.max(0, at);
+
+            const how = Sched.rotation(schedulePage.conf, slot ? slot.target : null);
+            orderBox.currentIndex = how.order === 'shuffle' ? 1 : 0;
+            intervalHourSpin.value = Math.floor(how.interval / 60);
+            intervalMinuteSpin.value = how.interval % 60;
             open();
         }
 
@@ -485,7 +503,13 @@ Flickable {
         onAccepted: {
             const id = slotId;
             const trig = trigger();
-            const target = targets[targetBox.currentIndex].target;
+            let target = targets[targetBox.currentIndex].target;
+            if (target.type === 'playlist') {
+                target = Object.assign({}, target, {
+                    order: orderBox.currentIndex === 1 ? 'shuffle' : 'sequential',
+                    interval: Math.max(1, intervalHourSpin.value * 60 + intervalMinuteSpin.value)
+                });
+            }
             root.updateSchedule(conf => {
                 const existing = conf.slots.find(s => s.id === id);
                 if (existing) {
@@ -562,6 +586,29 @@ Flickable {
                 textRole: "text"
             }
 
+            Label { text: "Change every"; visible: slotDialog.playlistChosen }
+            RowLayout {
+                visible: slotDialog.playlistChosen
+                SpinBox {
+                    id: intervalHourSpin
+                    from: 0; to: 23
+                }
+                Label { text: "h" }
+                SpinBox {
+                    id: intervalMinuteSpin
+                    from: 0; to: 59
+                }
+                Label { text: "min" }
+            }
+
+            Label { text: "Order"; visible: slotDialog.playlistChosen }
+            ComboBox {
+                id: orderBox
+                visible: slotDialog.playlistChosen
+                Layout.fillWidth: true
+                model: ["In order", "Shuffle"]
+            }
+
             Item { width: 1; height: 1 }
             Label {
                 Layout.fillWidth: true
@@ -579,7 +626,7 @@ Flickable {
         parent: Overlay.overlay
         anchors.centerIn: parent
         modal: true
-        title: "Playlist"
+        title: "Rename playlist"
         standardButtons: Dialog.Ok | Dialog.Cancel
 
         property string playlistId: ""
@@ -588,9 +635,6 @@ Flickable {
             if (!playlist) return;
             playlistId = playlist.id;
             nameField.text = playlist.name;
-            orderBox.currentIndex = playlist.order === 'shuffle' ? 1 : 0;
-            intervalHourSpin.value = Math.floor(playlist.interval / 60);
-            intervalMinuteSpin.value = playlist.interval % 60;
             open();
             nameField.forceActiveFocus();
             nameField.selectAll();
@@ -599,14 +643,10 @@ Flickable {
         onAccepted: {
             const id = playlistId;
             const name = nameField.text.trim();
-            const order = orderBox.currentIndex === 1 ? 'shuffle' : 'sequential';
-            const interval = Math.max(1, intervalHourSpin.value * 60 + intervalMinuteSpin.value);
             root.updateSchedule(conf => {
                 const pl = Sched.findPlaylist(conf, id);
                 if (!pl) return;
                 if (name) pl.name = name;
-                pl.order = order;
-                pl.interval = interval;
             });
         }
 
@@ -621,27 +661,6 @@ Flickable {
                 Layout.fillWidth: true
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 14
                 onAccepted: playlistDialog.accept()
-            }
-
-            Label { text: "Order" }
-            ComboBox {
-                id: orderBox
-                Layout.fillWidth: true
-                model: ["In order", "Shuffle"]
-            }
-
-            Label { text: "Change every" }
-            RowLayout {
-                SpinBox {
-                    id: intervalHourSpin
-                    from: 0; to: 23
-                }
-                Label { text: "h" }
-                SpinBox {
-                    id: intervalMinuteSpin
-                    from: 0; to: 59
-                }
-                Label { text: "min" }
             }
         }
     }

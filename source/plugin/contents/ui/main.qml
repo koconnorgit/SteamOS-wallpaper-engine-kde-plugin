@@ -106,9 +106,32 @@ Rectangle {
     // wallpaper or a rotating playlist; see js/schedule.mjs. What should be
     // showing is recomputed from the wall clock on every evaluation, so
     // nothing but a manual-pick hold needs to be remembered.
-    property var    scheduleConf: Sched.parse(wallpaper.configuration.ScheduleConf)
-    // identifies the schedule result that was last applied
-    property string scheduleKey: ""
+    // Slots are this monitor's own; playlists are shared by all monitors.
+    property var    scheduleConf: Sched.withPlaylists(
+        Sched.parse(wallpaper.configuration.ScheduleConf),
+        Sched.parsePlaylists(playlistStore.text))
+    PlaylistStore {
+        id: playlistStore
+        // Playlists edited, possibly from another monitor's settings: choose
+        // again. A wallpaper picked by hand stays put.
+        onTextChanged: Qt.callLater(() => {
+            background.setScheduleKey("");
+            background.evaluateSchedule();
+        })
+    }
+    // Identifies the schedule step that was last applied. The wallpaper for a
+    // step is decided once, when the step begins, and then left alone: what
+    // was chosen may depend on what the other monitors were showing at that
+    // moment. Kept in the config so a restart does not decide again.
+    readonly property string scheduleKey: wallpaper.configuration.ScheduleAppliedKey
+    function setScheduleKey(key) {
+        if (wallpaper.configuration.ScheduleAppliedKey !== key)
+            wallpaper.configuration.ScheduleAppliedKey = key;
+    }
+    // What this monitor shows, for the other monitors to steer clear of.
+    WallpaperPresence { id: presence }
+    readonly property string shownWid: wallpaper.configuration.WallpaperWorkShopId
+    onShownWidChanged: presence.wid = shownWid
     // Config values as last acted on, to tell what the settings dialog changed.
     // Change handlers on bound properties are used rather than Connections:
     // in testing, Connections handlers never fired for the config map's
@@ -161,13 +184,19 @@ Rectangle {
             // Changes are deferred while the wallpaper is paused (e.g. behind
             // a fullscreen window); okChanged brings us back here.
             if (res && res.item && res.key !== background.scheduleKey && background.ok) {
-                background.scheduleKey = res.key;
-                if (wallpaper.configuration.WallpaperWorkShopId !== res.item.wid ||
-                    wallpaper.configuration.WallpaperSource !== res.item.source) {
-                    console.log(`schedule: ${Sched.describeTrigger(res.slot.trigger)} -> ${res.item.wid}`);
-                    wallpaper.configuration.WallpaperWorkShopId = res.item.wid;
-                    wallpaper.configuration.WallpaperSource = res.item.source;
+                setScheduleKey(res.key);
+                // a playlist skips ahead past wallpapers other monitors show
+                const item = Sched.pickCandidate(res, presence.others(),
+                                                 wallpaper.configuration.WallpaperWorkShopId);
+                if (wallpaper.configuration.WallpaperWorkShopId !== item.wid ||
+                    wallpaper.configuration.WallpaperSource !== item.source) {
+                    console.log(`schedule: ${Sched.describeTrigger(res.slot.trigger)} -> ${item.wid}` +
+                                (item === res.item ? "" : ` (${res.item.wid} is on another monitor)`));
+                    wallpaper.configuration.WallpaperWorkShopId = item.wid;
+                    wallpaper.configuration.WallpaperSource = item.source;
                 }
+                // the other monitors may decide before the binding catches up
+                presence.wid = item.wid;
             }
         }
 
@@ -195,7 +224,7 @@ Rectangle {
         if (edited) {
             // an edited schedule takes effect right away
             setScheduleHoldUntil(0);
-            background.scheduleKey = "";
+            setScheduleKey("");
         } else if (picked) {
             const res = Sched.resolve(background.scheduleConf, Date.now(), scheduleSunTimes(), scheduleItemAvailable);
             setScheduleHoldUntil(res && res.nextSlotAt ? res.nextSlotAt : 0);
@@ -218,6 +247,21 @@ Rectangle {
             { wid: c.DayWallpaperWorkShopId, source: String(c.DayWallpaperSource) },
             { wid: c.NightWallpaperWorkShopId, source: String(c.NightWallpaperSource) });
         if (conf.enabled) c.ScheduleConf = Sched.serialize(conf);
+    }
+
+    // Playlists used to be stored with each monitor's schedule. Move any
+    // found there into the shared store.
+    function migrateSharedPlaylists() {
+        const c = wallpaper.configuration;
+        if (!c.ScheduleConf) return;
+        const conf = Sched.parse(c.ScheduleConf);
+        if (conf.playlists.length === 0) return;
+        const merged = Sched.mergePlaylists(Sched.parsePlaylists(playlistStore.text), conf.playlists);
+        if (!playlistStore.save(Sched.serializePlaylists(merged))) {
+            console.error("schedule: could not write", playlistStore.path);
+            return;
+        }
+        c.ScheduleConf = Sched.serialize(conf);
     }
 
     property string nowBackend: ""
@@ -481,7 +525,9 @@ Rectangle {
 
         lauchPauseTimer.start();
 
+        presence.wid = shownWid;
         migrateLegacySchedule();
+        migrateSharedPlaylists();
         scheduleSeenConf = wallpaper.configuration.ScheduleConf;
         scheduleSeenPick = wallpaper.configuration.ScheduleManualPick;
         evaluateSchedule();

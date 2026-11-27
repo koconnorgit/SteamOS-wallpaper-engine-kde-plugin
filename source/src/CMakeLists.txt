@@ -15,6 +15,8 @@ add_library(${PROJECT_NAME}
 	MouseGrabber.cpp
 	TTYSwitchMonitor.cpp
 	SunSchedule.cpp
+	PlaylistStore.cpp
+	WallpaperPresence.cpp
 	PluginInfo.cpp
 	FileHelper.cpp
 	qmldir

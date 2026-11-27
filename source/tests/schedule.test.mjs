@@ -151,7 +151,9 @@ test('parse sanitises input and round-trips', () => {
         { trigger: sunTrig('sunset', 60), target: wp('a') },
         { trigger: clock(13), target: { type: 'playlist', id: 'p1' } },
     ], [{ id: 'p1', name: 'Ünïcode ✓', order: 'shuffle', interval: 15, items: [item('x')] }]);
-    assert.deepEqual(S.parse(S.serialize(c)), c);
+    // serialize() keeps the per-monitor part; playlists travel separately
+    assert.deepEqual(S.parse(S.serialize(c)), { ...c, playlists: [] });
+    assert.deepEqual(S.withPlaylists(S.parse(S.serialize(c)), S.parsePlaylists(S.serializePlaylists(c.playlists))), c);
     const dirty = S.parse(JSON.stringify({ enabled: 1, slots: [{ id: 1, trigger: { type: 'clock', minutes: 1500 }, target: { type: 'wallpaper' } }], playlists: [{ id: 'p', interval: 0, items: [{}, item('x')] }] }));
     assert.equal(dirty.slots[0].trigger.minutes, 60);
     assert.equal(dirty.slots[0].target.type, 'none');
@@ -191,4 +193,100 @@ test('DST change does not shift clock slots', () => {
     assert.equal(r.item.wid, 'c');
     assert.equal(new Date(r.firedAt).getHours(), 13);
     assert.equal(new Date(r.nextSlotAt).getHours(), 1);
+});
+
+test('shared playlists parse, merge and resolve with a monitor\'s slots', () => {
+    assert.deepEqual(S.parsePlaylists(''), []);
+    assert.deepEqual(S.parsePlaylists('{broken'), []);
+    assert.deepEqual(S.parsePlaylists('{"version":1}'), []);
+    const a = { id: 'pa', name: 'A', order: 'sequential', interval: 10, items: [item('x'), item('y')] };
+    const b = { id: 'pb', name: 'B', order: 'sequential', interval: 10, items: [item('z')] };
+    const edited = { ...a, name: 'A, edited elsewhere' };
+    // merging keeps what the store already has and adds only unknown ids
+    assert.deepEqual(S.mergePlaylists([edited], [a, b]), [edited, b]);
+    assert.deepEqual(S.mergePlaylists([], [a]), [a]);
+
+    // a legacy per-monitor conf still yields its playlists, for migration
+    const legacy = JSON.stringify(conf([{ trigger: clock(8), target: { type: 'playlist', id: 'pa' } }], [a]));
+    assert.deepEqual(S.parse(legacy).playlists, [a]);
+
+    // two monitors, one playlist: same items, each from its own slots
+    const store = S.parsePlaylists(S.serializePlaylists([a, b]));
+    const mon1 = S.withPlaylists(S.parse(S.serialize(conf([{ trigger: clock(8), target: { type: 'playlist', id: 'pa' } }]))), store);
+    const mon2 = S.withPlaylists(S.parse(S.serialize(conf([{ trigger: clock(9), target: { type: 'playlist', id: 'pa' } }]))), store);
+    const now = new Date(2026, 5, 1, 9, 5).getTime();
+    assert.equal(S.resolve(mon1, now, null).item.wid, 'x'); // 65 min in: step 6
+    assert.equal(S.resolve(mon2, now, null).item.wid, 'x'); // 5 min in: step 0
+    assert.equal(S.resolve(mon1, now + 10 * 60000, null).item.wid, 'y');
+    // a slot whose playlist was deleted elsewhere shows nothing new
+    const gone = S.withPlaylists(mon1, [b]);
+    assert.equal(S.resolve(gone, now, null).item, null);
+});
+
+test('monitors sharing a shuffled playlist shuffle it differently', () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `w${i}`);
+    const shared = [{ id: 'p', name: 'P', order: 'shuffle', interval: 10, items: ids.map(item) }];
+    const monitor = slotId => ({ version: 1, enabled: true, playlists: shared,
+        slots: [{ id: slotId, trigger: clock(8), target: { type: 'playlist', id: 'p' } }] });
+    const order = c => ids.map((_, i) => S.resolve(c, at(8, 5 + i * 10), null).item.wid);
+    const a = order(monitor('sA')), b = order(monitor('sB'));
+    assert.notDeepEqual(a, b);
+    // each is still a full pass with no repeats, and stable when recomputed
+    assert.deepEqual([...a].sort(), [...ids].sort());
+    assert.deepEqual([...b].sort(), [...ids].sort());
+    assert.deepEqual(order(monitor('sA')), a);
+});
+
+test('pickCandidate skips wallpapers showing on other monitors', () => {
+    const pl = [{ id: 'p', name: 'P', order: 'sequential', interval: 10, items: ['a', 'b', 'c'].map(item) }];
+    const c = conf([{ trigger: clock(8), target: { type: 'playlist', id: 'p' } }], pl);
+    const res = S.resolve(c, at(8, 15), null); // step 1: b, then c, a
+    assert.deepEqual(res.candidates.map(i => i.wid), ['b', 'c', 'a']);
+    assert.equal(S.pickCandidate(res, []).wid, 'b');
+    assert.equal(S.pickCandidate(res, ['b']).wid, 'c');
+    assert.equal(S.pickCandidate(res, ['c', 'b']).wid, 'a');
+    // nothing free: fall back to the regular pick
+    assert.equal(S.pickCandidate(res, ['a', 'b', 'c']).wid, 'b');
+    // skipping ahead prefers a change over staying on the current wallpaper
+    assert.equal(S.pickCandidate(res, ['b'], 'c').wid, 'a');
+    assert.equal(S.pickCandidate(res, ['b', 'a'], 'c').wid, 'c');
+    // ...but the regular pick is kept even when it is already showing here
+    assert.equal(S.pickCandidate(res, ['c'], 'b').wid, 'b');
+    // unavailable wallpapers are never candidates
+    const some = S.resolve(c, at(8, 15), null, it => it.wid !== 'c');
+    assert.deepEqual(some.candidates.map(i => i.wid), ['b', 'a']);
+    // a slot with one wallpaper is an explicit choice and is not moved
+    const fixed = S.resolve(conf([{ trigger: clock(8), target: wp('a') }]), at(9), null);
+    assert.equal(S.pickCandidate(fixed, ['a']).wid, 'a');
+    assert.equal(S.pickCandidate(null, ['a']), null);
+});
+
+test('rotation settings belong to the slot, not the playlist', () => {
+    const plain = [{ id: 'p', name: 'P', items: ['a', 'b', 'c'].map(item) }];
+    assert.deepEqual(S.parsePlaylists(S.serializePlaylists(plain)), plain);
+    const c = conf([
+        { trigger: clock(8), target: { type: 'playlist', id: 'p', interval: 10, order: 'sequential' } },
+        { trigger: clock(12), target: { type: 'playlist', id: 'p', interval: 60, order: 'sequential' } },
+        { trigger: clock(20), target: { type: 'playlist', id: 'p' } },
+    ], plain);
+    // the same playlist changes every 10 min in one slot and hourly in another
+    assert.equal(S.resolve(c, at(8, 25), null).item.wid, 'c');
+    assert.equal(S.resolve(c, at(8, 25), null).nextChangeAt, at(8, 30));
+    assert.equal(S.resolve(c, at(12, 25), null).item.wid, 'a');
+    assert.equal(S.resolve(c, at(13, 5), null).item.wid, 'b');
+    // defaults when a slot says nothing
+    assert.deepEqual(S.rotation(c, c.slots[2].target), { order: 'sequential', interval: 30 });
+    assert.equal(S.resolve(c, at(20, 35), null).item.wid, 'b');
+    // slot settings survive a save and reload
+    const back = S.withPlaylists(S.parse(S.serialize(c)), plain);
+    assert.deepEqual(back.slots[1].target, { type: 'playlist', id: 'p', interval: 60, order: 'sequential' });
+    assert.deepEqual(back.slots[2].target, { type: 'playlist', id: 'p' });
+
+    // a slot from before the change keeps rotating the way its playlist said
+    const old = [{ id: 'p', name: 'P', order: 'shuffle', interval: 15, items: ['a', 'b', 'c'].map(item) }];
+    const legacy = conf([{ trigger: clock(8), target: { type: 'playlist', id: 'p' } }], S.parsePlaylists(S.serializePlaylists(old)));
+    assert.deepEqual(S.rotation(legacy, legacy.slots[0].target), { order: 'shuffle', interval: 15 });
+    // ...until the slot gets settings of its own
+    legacy.slots[0].target.interval = 5;
+    assert.deepEqual(S.rotation(legacy, legacy.slots[0].target), { order: 'shuffle', interval: 5 });
 });

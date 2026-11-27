@@ -2,8 +2,14 @@
 //
 // A schedule is a list of slots. Each slot is a change point: it fires at a
 // moment (a clock time, or sunrise/sunset plus an offset) and stays active
-// until another slot fires. A slot targets one wallpaper or a playlist; a
-// playlist rotates on its own interval, counted from the moment the slot fired.
+// until another slot fires. A slot targets one wallpaper or a playlist. A
+// playlist is only a list of wallpapers: how often to change and in what
+// order belong to the slot using it, counted from the moment the slot fired.
+//
+// Slots belong to one monitor; playlists are shared by all of them and are
+// stored separately (see PlaylistStore). A conf object carries both, but
+// serialize() writes only the per-monitor part and serializePlaylists() the
+// shared part.
 //
 // Everything here is a pure function of (config, now, sun times), so the
 // right wallpaper can be recomputed after a restart or suspend without any
@@ -28,15 +34,8 @@ export function parse(str) {
     }
     if (!data || typeof data !== 'object') return conf;
     conf.enabled = Boolean(data.enabled);
-    if (Array.isArray(data.playlists)) {
-        conf.playlists = data.playlists.filter(p => p && p.id).map(p => ({
-            id: String(p.id),
-            name: String(p.name || 'Playlist'),
-            order: p.order === 'shuffle' ? 'shuffle' : 'sequential',
-            interval: Math.max(1, Math.round(Number(p.interval) || 30)),
-            items: Array.isArray(p.items) ? p.items.filter(isItem).map(cleanItem) : []
-        }));
-    }
+    // Only present in configs written before playlists became shared.
+    conf.playlists = cleanPlaylists(data.playlists);
     if (Array.isArray(data.slots)) {
         conf.slots = data.slots.filter(s => s && s.id).map(s => ({
             id: String(s.id),
@@ -47,8 +46,80 @@ export function parse(str) {
     return conf;
 }
 
+// The per-monitor part of a conf: everything but the playlists.
 export function serialize(conf) {
-    return JSON.stringify(conf);
+    return JSON.stringify({ version: VERSION, enabled: Boolean(conf.enabled), slots: conf.slots });
+}
+
+function cleanPlaylists(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter(p => p && p.id).map(p => {
+        const out = {
+            id: String(p.id),
+            name: String(p.name || 'Playlist'),
+            items: Array.isArray(p.items) ? p.items.filter(isItem).map(cleanItem) : []
+        };
+        // Order and interval used to be set on the playlist. They are kept
+        // when present, as the fallback for slots saved back then (rotation()).
+        if (p.order !== undefined) out.order = cleanOrder(p.order);
+        if (p.interval !== undefined) out.interval = cleanInterval(p.interval);
+        return out;
+    });
+}
+
+export const DEFAULT_ORDER = 'sequential';
+export const DEFAULT_INTERVAL = 30; // minutes
+
+function cleanOrder(order) {
+    return order === 'shuffle' ? 'shuffle' : 'sequential';
+}
+
+function cleanInterval(interval) {
+    return Math.max(1, Math.round(Number(interval) || DEFAULT_INTERVAL));
+}
+
+// How a slot rotates through its playlist: { order, interval (minutes) }.
+// Set on the slot's target; a slot from before that falls back on what its
+// playlist used to carry.
+export function rotation(conf, target) {
+    const pl = target && target.type === 'playlist' ? findPlaylist(conf, target.id) : null;
+    const pick = key => (target && target[key] !== undefined) ? target[key]
+        : (pl && pl[key] !== undefined) ? pl[key] : undefined;
+    const order = pick('order'), interval = pick('interval');
+    return {
+        order: order === undefined ? DEFAULT_ORDER : cleanOrder(order),
+        interval: interval === undefined ? DEFAULT_INTERVAL : cleanInterval(interval)
+    };
+}
+
+// ---- shared playlists ----
+
+export function parsePlaylists(str) {
+    if (!str) return [];
+    try {
+        const data = JSON.parse(str);
+        return cleanPlaylists(data && data.playlists);
+    } catch (e) {
+        return [];
+    }
+}
+
+export function serializePlaylists(playlists) {
+    return JSON.stringify({ version: VERSION, playlists: playlists || [] });
+}
+
+// The same conf with `playlists` in place of its own.
+export function withPlaylists(conf, playlists) {
+    return Object.assign({}, conf, { playlists: playlists || [] });
+}
+
+// `existing` plus those of `incoming` it does not have yet (matched by id).
+export function mergePlaylists(existing, incoming) {
+    const out = (existing || []).slice();
+    (incoming || []).forEach(p => {
+        if (!out.some(e => e.id === p.id)) out.push(p);
+    });
+    return out;
 }
 
 export function clone(conf) {
@@ -85,7 +156,12 @@ function cleanTrigger(t) {
 }
 
 function cleanTarget(t) {
-    if (t && t.type === 'playlist' && t.id) return { type: 'playlist', id: String(t.id) };
+    if (t && t.type === 'playlist' && t.id) {
+        const out = { type: 'playlist', id: String(t.id) };
+        if (t.order !== undefined) out.order = cleanOrder(t.order);
+        if (t.interval !== undefined) out.interval = cleanInterval(t.interval);
+        return out;
+    }
     if (t && t.type === 'wallpaper' && isItem(t)) return Object.assign({ type: 'wallpaper' }, cleanItem(t));
     return { type: 'none' };
 }
@@ -215,6 +291,8 @@ export function playlistIndex(order, count, step, seedBase) {
 //   slot         active slot
 //   firedAt      when it fired
 //   item         { wid, source, ... } to show, or null if the target is empty
+//   candidates   item first, then what to fall back on if it should not be
+//                shown (see pickCandidate); the rest of the playlist in order
 //   key          changes whenever the wallpaper to show changes
 //   nextSlotAt   when the next slot fires (any slot)
 //   nextChangeAt when to evaluate again (next slot or next playlist step)
@@ -237,6 +315,7 @@ export function resolve(conf, now, sun, isAvailable) {
         slot: active,
         firedAt: firedAt,
         item: null,
+        candidates: [],
         playlist: null,
         index: -1,
         key: `${active.id}@${firedAt}`,
@@ -246,16 +325,24 @@ export function resolve(conf, now, sun, isAvailable) {
 
     const target = active.target;
     if (target.type === 'wallpaper') {
-        if (ok(target)) res.item = target;
+        if (ok(target)) {
+            res.item = target;
+            res.candidates = [target];
+        }
     } else if (target.type === 'playlist') {
         const pl = findPlaylist(conf, target.id);
         const items = pl ? pl.items.filter(ok) : [];
         if (items.length > 0) {
-            const interval = pl.interval * MIN_MS;
+            const how = rotation(conf, target);
+            const interval = how.interval * MIN_MS;
             const step = Math.floor((now - firedAt) / interval);
             res.playlist = pl;
-            res.index = playlistIndex(pl.order, items.length, step, `${pl.id}@${firedAt}`);
+            // The slot id is part of the shuffle seed: playlists are shared, and
+            // two monitors using the same one at the same time should not
+            // shuffle it identically. Slot ids are unique to each monitor.
+            res.index = playlistIndex(how.order, items.length, step, `${pl.id}@${firedAt}@${active.id}`);
             res.item = items[res.index];
+            res.candidates = items.map((_, i) => items[(res.index + i) % items.length]);
             if (items.length > 1) {
                 const nextStep = firedAt + (step + 1) * interval;
                 if (res.nextChangeAt === null || nextStep < res.nextChangeAt) res.nextChangeAt = nextStep;
@@ -264,6 +351,21 @@ export function resolve(conf, now, sun, isAvailable) {
     }
     if (res.item) res.key += `#${res.item.wid}#${res.item.source}`;
     return res;
+}
+
+// Keeps monitors from showing the same wallpaper. `taken` holds the workshop
+// ids showing on the other monitors, `current` the one showing on this one.
+// The regular pick is used when it is free. Otherwise the playlist skips
+// ahead to the next free wallpaper, preferably one other than `current`, so
+// that the monitor still changes when its playlist moves on. A slot with a
+// single wallpaper has one candidate and always gets it; so does a playlist
+// with nothing free.
+export function pickCandidate(res, taken, current) {
+    if (!res || !res.item) return null;
+    const used = taken || [];
+    const free = res.candidates.filter(it => used.indexOf(it.wid) < 0);
+    if (free.length === 0 || free[0] === res.item) return res.item;
+    return free.find(it => it.wid !== current) || free[0];
 }
 
 // ---- display helpers ----

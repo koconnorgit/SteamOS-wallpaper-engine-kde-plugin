@@ -6,6 +6,8 @@
 #include "MouseGrabber.hpp"
 #include "TTYSwitchMonitor.hpp"
 #include "SunSchedule.hpp"
+#include "PlaylistStore.hpp"
+#include "WallpaperPresence.hpp"
 #include "PluginInfo.hpp"
 #include "FileHelper.hpp"
 
@@ -25,6 +27,8 @@ public:
         qmlRegisterType<mpv::MpvObject>(uri, WPVer[0], WPVer[1], "Mpv");
         qmlRegisterType<wekde::TTYSwitchMonitor>(uri, WPVer[0], WPVer[1], "TTYSwitchMonitor");
         qmlRegisterType<wekde::SunSchedule>(uri, WPVer[0], WPVer[1], "SunSchedule");
+        qmlRegisterType<wekde::PlaylistStore>(uri, WPVer[0], WPVer[1], "PlaylistStore");
+        qmlRegisterType<wekde::WallpaperPresence>(uri, WPVer[0], WPVer[1], "WallpaperPresence");
         qmlRegisterType<wekde::FileHelper>(uri, WPVer[0], WPVer[1], "FileHelper");
     }
 };

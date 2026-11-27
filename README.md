@@ -5,8 +5,8 @@
 This fork (koconnorgit) adds a **wallpaper schedule**: each monitor can change its wallpaper at set times of day or relative to sunrise and sunset, and rotate through playlists.
 
 - **Slots** say when to change. A slot fires at a clock time (13:00) or at sunrise/sunset with an optional offset (1 h after sunset, 30 min before sunrise), and stays in effect until the next slot fires.
-- A slot shows either **one wallpaper** or a **playlist**. A playlist rotates through its wallpapers, in order or shuffled, on its own interval for as long as its slot is in effect.
-- Schedules and playlists are **per monitor**; set them up in each screen's wallpaper settings.
+- A slot shows either **one wallpaper** or a **playlist**. A playlist is just a list of wallpapers; each slot that uses one sets how often to change and whether to go in order or shuffled, for as long as that slot is in effect.
+- Slots are **per monitor**; set them up in each screen's wallpaper settings. **Playlists are shared**: build one once and use it from any monitor's slots. Each monitor still rotates through it on its own, counted from when its own slot fired. A playlist never puts up a wallpaper another monitor is already showing; it skips ahead to the next free one. Playlists are stored in `~/.config/wallpaper-engine-kde-playlists.json`.
 
 Where things are:
 

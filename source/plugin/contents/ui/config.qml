@@ -101,8 +101,15 @@ ColumnLayout {
         `, this);
     }
 
+    // tells the settings dialog something outside the cfg_ values changed
+    signal configurationChanged
+
     function saveConfig() {
         wallpaperPage.saveConfig();
+        if (playlistsDirty && playlistStore) {
+            if (playlistStore.save(playlistsText)) playlistsDirty = false;
+            else console.error("could not write", playlistStore.path);
+        }
     }
 
     // ---- wallpaper schedule (slots and playlists, see js/schedule.mjs) ----
@@ -112,12 +119,31 @@ ColumnLayout {
     property string cfg_ScheduleManualPick
     property bool   userPicked: false
 
-    readonly property var schedule: Sched.parse(cfg_ScheduleConf)
+    // Playlists are shared by all monitors and live in their own file rather
+    // than in this monitor's config. Edits are kept here until the dialog is
+    // applied (saveConfig), like every other setting.
+    property var    playlistStore: null
+    property string playlistsText: ""
+    property bool   playlistsDirty: false
+    readonly property string storedPlaylistsText: playlistStore ? playlistStore.text : ""
+    onStoredPlaylistsTextChanged: if (!playlistsDirty) playlistsText = storedPlaylistsText
+
+    // this monitor's slots together with the shared playlists
+    readonly property var schedule: Sched.withPlaylists(
+        Sched.parse(cfg_ScheduleConf), Sched.parsePlaylists(playlistsText))
 
     function updateSchedule(change) {
+        const before = Sched.serializePlaylists(root.schedule.playlists);
         const conf = Sched.clone(root.schedule);
         change(conf);
-        cfg_ScheduleConf = Sched.serialize(conf);
+        const playlists = Sched.serializePlaylists(conf.playlists);
+        if (playlists !== before) {
+            playlistsDirty = true;
+            playlistsText = playlists;
+            configurationChanged();
+        }
+        const own = Sched.serialize(conf);
+        if (own !== cfg_ScheduleConf) cfg_ScheduleConf = own;
     }
     // schedule entry for a wallpaper from the list model
     function scheduleItem(model) {
@@ -162,8 +188,6 @@ ColumnLayout {
             conf.playlists.push({
                 id: id,
                 name: `Playlist ${conf.playlists.length + 1}`,
-                order: 'sequential',
-                interval: 30,
                 items: item ? [item] : []
             });
         });
@@ -204,10 +228,22 @@ ColumnLayout {
         const cur = schedulePage.current;
         if (cur) {
             collect(cur.slot, res.active);
-            if (cur.item) res.showing = cur.item.wid;
+            const shown = root.scheduleShowing;
+            if (shown) res.showing = shown.wid;
         }
         return res;
     }
+    // What the active slot has on screen. A playlist may have skipped past
+    // its regular pick because another monitor was showing it, so when the
+    // wallpaper on screen belongs to the playlist, that is the answer.
+    readonly property var scheduleShowing: {
+        const cur = schedulePage.current;
+        if (!cur || !cur.item) return null;
+        const live = cur.candidates.find(it => it.wid === root.liveWallpaperId);
+        return live || cur.item;
+    }
+    readonly property string liveWallpaperId: wallpaperConfiguration
+        ? String(wallpaperConfiguration.WallpaperWorkShopId) : ""
 
     // "Scheduled" toggle on the Wallpapers tab: list only those wallpapers.
     // Has no effect while nothing is scheduled.
@@ -223,6 +259,15 @@ ColumnLayout {
         : null
     Component.onCompleted: {
         if (!libcheck.wallpaper) return;
+        try {
+            playlistStore = Qt.createQmlObject(`
+                import QtQuick 2.0;
+                import com.github.catsout.wallpaperEngineKde 1.2
+                PlaylistStore {}
+            `, root);
+        } catch (e) {
+            console.error("PlaylistStore is not available; rebuild the plugin library", e);
+        }
         try {
             sunSchedule = Qt.createQmlObject(`
                 import QtQuick 2.0;
