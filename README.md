@@ -36,154 +36,40 @@ cd SteamOS-wallpaper-engine-kde-plugin
 
 The script installs build dependencies, builds from source, installs the C++ library system-wide, registers the wallpaper package with `kpackagetool6`, and restarts plasmashell.
 
----
+The script uses `pacman`, so it only works on Arch-based distributions. Wallpaper Engine itself has to be installed through Steam first; scenes need its `assets` folder.
 
-# wallpaper-engine (kde-/plasma-plugin)
-## <a href="https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/#Arch">arch</a> <a href="https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/#SteamOS">(SteamOS)</a> + <a href="https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/#apt--debian--ubuntu">Debian</a> (+ Ubuntu, Kali, Deepin, Elementary, Mint etc.), <a href="https://github.com/Deadlydav/wallpaper-engine-kde-nobara">Fedora / Nobara</a>, <a href="https://github.com/slynobody/linux_wallpaper_engine__precompiled/tree/main">other (f.e. hyprland)</a>
+## After installation
 
-* use wallpaper-engine-files natively (linux, precompiled
-* KDE-Plasma Plugin (Desktop-Mode: right-click, background ...)
+1. Right-click the desktop → **Configure Desktop and Wallpaper**.
+2. Change the wallpaper type from **Image** to **Wallpaper Engine**.
+3. Point it to your Steam library folder (the one containing `steamapps`):
+   - common: `~/.local/share/Steam`
+   - Steam Deck: `~/.steam/steam`
+   - Flatpak: `~/.var/app/com.valvesoftware.Steam/data/Steam`
 
-<sub> ** precompiled for simple use (f.e. through limits of steam-decks-compilation-capabilities, <a href="https://github.com/catsout/wallpaper-engine-kde-plugin/issues/177">see</a>
+If scenes that used to work start crashing Plasma, try the **win 7 compatibility** beta of Wallpaper Engine (Steam → Library → right-click Wallpaper Engine → Properties → Betas).
 
-<img src="https://images.pling.com/img/00/00/78/78/79/2160403/screenshot-20240602-192228.png"/>
+## If Plasma crashes on start
 
-# installation
-*no need to install the plugin through discover*, everything gets installed system-wide through packages here</sub>
+Open a terminal (Ctrl+Alt+T, or a console login) and remove the plugin from the desktop config, then log out:
 
-# SteamOS 
-SteamOS 3.8.x (beta)
-
-> sudo steamos-devmode enable --no-prompt
->
-> sudo wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.55d_arch/WallpaperEngine_kde6-1.1d-1-x86_64.pkg.tar.zst
->
-> sudo pacman -U ./WallpaperEngine_kde6-1.1d-1-x86_64.pkg.tar.zst --overwrite '*'
-> 
-> kpackagetool6 -r ~/.local/share/plasma/wallpapers/com.github.casout.wallpaperEngineKde && qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var allDesktops = desktops();print (allDesktops);for (i=0;i<allDesktops.length;i++) {d = allDesktops[i];d.wallpaperPlugin = "org.kde.image";d.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");d.writeConfig("Image", "file:///media/sda2/Background/SpaceWall/Escape_Function.jpg")}' & plasmashell --replace &
->
-> sudo steamos-readonly enable
-
-<details>
-  <summary>older</summary>
-  
- # install (SteamOS)
-> sudo steamos-devmode enable --no-prompt
->
-> sudo wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.5.5c_arch/WallpaperEngine_kde6-3_1c-1-x86_64.pkg.tar.zst
->
-> sudo pacman -U ./WallpaperEngine_kde6-3_1c-1-x86_64.pkg.tar.zst --overwrite '*'
->
-> plasmapkg2 -r ~/.local/share/plasma/wallpapers/com.github.casout.wallpaperEngineKde && qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript 'var allDesktops = desktops();print (allDesktops);for (i=0;i<allDesktops.length;i++) {d = allDesktops[i];d.wallpaperPlugin = "org.kde.image";d.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");d.writeConfig("Image", "file:///media/sda2/Background/SpaceWall/Escape_Function.jpg")}' & plasmashell --replace &
-> 
-> sudo steamos-readonly enable
-
-</details> 
-
-
-# apt  (Debian / Ubuntu)
-Plasma 6.5/6 (qt 6.10.2)
-> wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.6a/int_wallpaper_engine_qt6-1-1_amd64.deb
-> 
-> sudo apt install ./int_wallpaper_engine_qt6-1-1_amd64.deb
-
-<details>
-  <summary>older (Deb)</summary>
-   
- Plasma 6.3-6.53 / qt 6.8.2-6.9.2
-> wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.6_beta/int_wallpaper_engine_qt6-1-1_amd64.deb
-> 
-> sudo apt install ./int_wallpaper_engine_qt6-1-1_amd64.deb
-
-Legacy: Plasma 6.1-6.2
-> wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.5.5a/int_wallpaper_engine_qt6-1-1_amd64.deb
-> 
-> sudo apt install ./int_wallpaper_engine_qt6-1-1_amd64.deb
-
-Legacy: Plasma 5 / qt5*
-> wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.5.5/int_wallpaper_engine_1-1_amd64.deb
->
-> sudo apt install ./int_wallpaper_engine_1-1_amd64.deb 
-
-</details> 
-
-# Arch
-plasma 6.6.3
-> sudo wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.55d_arch/WallpaperEngine_kde6-1.1h-1-x86_64.pkg.tar.zst
->
-> sudo pacman -U ./WallpaperEngine_kde6-1.1h-1-x86_64.pkg.tar.zst --overwrite '*'
-
-<details>
-  <summary>older (Arch)</summary>
-   
-plasma 6.3-6.5.3
-> sudo wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.5.5c_arch/WallpaperEngine_kde6-3_1c-1-x86_64.pkg.tar.zst
->
-> sudo pacman -U ./WallpaperEngine_kde6-3_1c-1-x86_64.pkg.tar.zst --overwrite '*'
-
-Legacy: plasma 6-6.2)
-> sudo wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.5.5_qt6_arch/WallpaperEngine_kde6-1.1a-1-x86_64.pkg.tar.zst
->
-> sudo pacman -U ./WallpaperEngine_kde6-1.1a-1-x86_64.pkg.tar.zst --overwrite '*'
-
-Legacy: plasma 5
-> sudo wget https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin/releases/download/0.5.5_arch/WallpaperEngine_kde-1_1-1-x86_64.pkg.tar.zst
->
-> sudo pacman -U ./WallpaperEngine_kde-1_1-1-x86_64.pkg.tar.zst --overwrite '*'
-</details> 
-
-
-# after installation
-1. **Switch Wallpaper Engine to the compatibility beta:** (**-> prevents plasma crashes / higher chances problematic wps run**)
-   - Steam -> Library -> right-click **Wallpaper Engine** -> Properties -> Beta
-   - Select **"win 7 compatibility"**
-2. **Restart Plasma:**
-   - Log out and back in, or run: `plasmashell --replace &` -- or restart
-3. **Configure your wallpaper:**
-   - Right-click desktop -> **Configure Desktop and Wallpaper**
-   - Change wallpaper type from **"Image"** to **"Wallpaper Engine"**
-   - Point it to your Steam library folder (the one containing `steamapps`) 
-
-# 'Steam library'-path (common)
-> ~/.local/share/Steam
-
-steam-deck
-> ~/.steam/steam
-
-flatpak 
-> ~/.var/app/com.valvesoftware.Steam/data/Steam
-
-# crashes!
-* CTRL+ALT+T (Terminal) -- or boot into konsole -- then:
-> sed -i '/wallpaperEngineKde/d' ~/.config/plasma-org.kde.plasma.desktop-appletsrc & qdbus6 org.kde.Shutdown /Shutdown logout
-
-* WPE needs to be installed through steam before usage (main source of 'scene'-errors because of missing 'assets'-folder)
-```diff
-- choose WPE-version in steam: 'windows 7 compatibility' (esp. when 'scenes' crash that formerly worked)
+```bash
+sed -i '/wallpaperEngineKde/d' ~/.config/plasma-org.kde.plasma.desktop-appletsrc
+qdbus6 org.kde.Shutdown /Shutdown logout
 ```
-* also try <a href="https://github.com/slynobody/linux_wallpaper_engine__precompiled/tree/main">this.</a>
 
-no responsibility taken for usage.
+## Uninstall
 
-# i dont use kde! (but gnome, lxqt, hyprland etc.)
-* try <a href="https://github.com/slynobody/linux_wallpaper_engine__precompiled/tree/main">this.</a>
+Switch each desktop to another wallpaper type first, then:
 
-# how do i get SteamOS 3.9?
-> gamemode, settings-tab left: scroll down, tap 'enter developer mode'
-> 
-> in the new developer-tab on the left: enable 'extended update-channels'
-> 
-> go back to system-tab left: enable new OS-Update-Channel 'Main', check for updates>
+```bash
+kpackagetool6 -t Plasma/Wallpaper -r com.github.catsout.wallpaperEngineKde
+sudo rm -r /usr/lib/qt6/qml/com/github/catsout/wallpaperEngineKde \
+           /usr/share/plasma/wallpapers/com.github.catsout.wallpaperEngineKde
+```
 
+## Credits
 
-# i want to remove this!
-> cd SteamOS-wallpaper-engine-kde-plugin
->
-> ./remove.sh
+Based on [catsout/wallpaper-engine-kde-plugin](https://github.com/catsout/wallpaper-engine-kde-plugin), by way of [slynobody/SteamOS-wallpaper-engine-kde-plugin](https://github.com/slynobody/SteamOS-wallpaper-engine-kde-plugin), which also offers prebuilt packages of the original plugin for SteamOS and Debian (without this fork's additions).
 
-# Disclaimer
-1. Use at your own risk!
-2. This is for educational and research purposes only!
-3. No responsibility taken for any local customizations of the git!
-> 
-<a href="https://artsandculture.google.com/experiment/viola-the-bird/nAEJVwNkp-FnrQ?cp=e30."><img src="https://images.pling.com/img/00/00/78/78/79/2160403/proxy-image1.jpeg"/></a>
+Use at your own risk.
