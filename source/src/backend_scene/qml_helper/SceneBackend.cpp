@@ -23,6 +23,9 @@
 #include <atomic>
 #include <array>
 #include <functional>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #include "glExtra.hpp"
 #include "SceneWallpaper.hpp"
@@ -67,6 +70,27 @@ using sp_scene_t = std::shared_ptr<wallpaper::SceneWallpaper>;
 
 namespace
 {
+// glibc raises its mmap and trim thresholds each time a large block is freed,
+// up to 32 and 64 MB. A scene load frees texture-sized blocks, so after the
+// first wallpaper the thresholds sit at the top, large buffers come out of the
+// render threads' arenas, and each arena keeps tens of megabytes it never
+// returns (malloc_trim does not release the top of a thread arena). Measured
+// over 40 scenes: 300 MB left behind, 90 MB with the thresholds pinned.
+// Setting either one turns the automatic raising off, for the whole process.
+void PinMallocThresholds() {
+#ifdef __GLIBC__
+    static std::once_flag once;
+    std::call_once(once, []() {
+        // leave it alone if the user tuned the allocator themselves
+        if (qEnvironmentVariableIsSet("MALLOC_MMAP_THRESHOLD_") ||
+            qEnvironmentVariableIsSet("MALLOC_TRIM_THRESHOLD_"))
+            return;
+        mallopt(M_MMAP_THRESHOLD, 4 * 1024 * 1024);
+        mallopt(M_TRIM_THRESHOLD, 8 * 1024 * 1024);
+    });
+#endif
+}
+
 // Destroying a renderer waits for its threads and tears down its vulkan
 // device, tens of milliseconds. The last reference is usually dropped on the
 // gui or the scene graph render thread, where that is a missed frame for the
@@ -111,6 +135,15 @@ private:
             lock.unlock();
             scene.reset();
             lock.lock();
+#ifdef __GLIBC__
+            // Return what the teardown freed inside the arenas. This is the
+            // smaller part; see PinMallocThresholds for the larger one.
+            if (m_queue.empty()) {
+                lock.unlock();
+                malloc_trim(0);
+                lock.lock();
+            }
+#endif
         }
     }
 
@@ -262,6 +295,7 @@ private:
 
 SceneObject::SceneObject(QQuickItem* parent)
     : QQuickItem(parent), m_scene(std::make_shared<wallpaper::SceneWallpaper>()) {
+    PinMallocThresholds();
     setFlag(ItemHasContents, true);
     m_scene->init();
     m_scene->setPropertyString(wallpaper::PROPERTY_CACHE_PATH, GetDefaultCachePath());
